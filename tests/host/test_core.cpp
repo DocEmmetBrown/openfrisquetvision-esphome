@@ -13,6 +13,7 @@
 
 #include "../../components/frisquet/proto_crc.h"
 #include "../../components/frisquet/proto_decode.h"
+#include "../../components/frisquet/proto_tracker.h"
 
 #ifndef FIXTURES
 #define FIXTURES "tests/fixtures/frames.txt"
@@ -192,10 +193,76 @@ static void test_other_reads() {
   CHECK(c.hot_water == 0 && c.heating == 0);
 
   frisquet::DecodedHotWaterMode m;
-  const Bytes &e = F["payload_a0f0"];
+  const Bytes &e = F["payload_a0fc"];
   CHECK(frisquet::decode_hot_water_mode(e.data(), e.size(), m));
   CHECK(m.mode == frisquet::HotWaterMode::kEcoScheduled);
   CHECK(m.frame_bits == 0x80);
+
+  frisquet::AnnualConsumption annual;
+  const Bytes &a = F["payload_a063"];
+  CHECK(a.size() == 55);
+  CHECK(frisquet::decode_annual_consumption(a.data(), a.size(), annual));
+  CHECK(annual.heating == 0 && annual.hot_water == 0);
+  // Heating then hot water per month: set January heating=100, December hot water=7.
+  Bytes synthetic = a;
+  synthetic[7 + 0 * 4 + 1] = 100;
+  synthetic[7 + 11 * 4 + 3] = 7;
+  synthetic[7 + 5 * 4] = 0x01;  // June heating = 256
+  CHECK(frisquet::decode_annual_consumption(synthetic.data(), synthetic.size(), annual));
+  CHECK(annual.heating == 356);
+  CHECK(annual.hot_water == 7);
+  Bytes wrong_length = a;
+  wrong_length[6] = 47;
+  CHECK(!frisquet::decode_annual_consumption(wrong_length.data(), wrong_length.size(), annual));
+}
+
+static void test_read_tracker() {
+  using frisquet::ReadKind;
+  frisquet::ReadTracker tracker;
+  ReadKind kind = ReadKind::kUnknown;
+
+  // Answers are matched to the request seen earlier, by requester and message id.
+  const Bytes &req_info = F["payload_79f2_request"];
+  const Bytes &ans_info = F["payload_79f2_idle"];
+  CHECK(!tracker.on_frame(req_info.data(), req_info.size(), 1000, kind));
+  CHECK(tracker.on_frame(ans_info.data(), ans_info.size(), 1500, kind));
+  CHECK(kind == ReadKind::kInfo);
+  // An answer is consumed once.
+  CHECK(!tracker.on_frame(ans_info.data(), ans_info.size(), 1600, kind));
+
+  const Bytes &req_cons = F["payload_7a18_request"];
+  const Bytes &ans_cons = F["payload_7a18"];
+  const Bytes &req_hw = F["payload_a0fc_request"];
+  const Bytes &ans_hw = F["payload_a0fc"];
+  const Bytes &req_year = F["payload_a063_request"];
+  const Bytes &ans_year = F["payload_a063"];
+  tracker.on_frame(req_cons.data(), req_cons.size(), 2000, kind);
+  tracker.on_frame(req_hw.data(), req_hw.size(), 2100, kind);
+  tracker.on_frame(req_year.data(), req_year.size(), 2200, kind);
+  CHECK(tracker.on_frame(ans_year.data(), ans_year.size(), 2300, kind));
+  CHECK(kind == ReadKind::kAnnualConsumption);
+  CHECK(tracker.on_frame(ans_hw.data(), ans_hw.size(), 2400, kind));
+  CHECK(kind == ReadKind::kHotWaterMode);
+  CHECK(tracker.on_frame(ans_cons.data(), ans_cons.size(), 2500, kind));
+  CHECK(kind == ReadKind::kConsumption);
+
+  // Answer without a request, or too late, is ignored.
+  CHECK(!tracker.on_frame(ans_info.data(), ans_info.size(), 3000, kind));
+  tracker.on_frame(req_info.data(), req_info.size(), 10000, kind);
+  CHECK(!tracker.on_frame(ans_info.data(), ans_info.size(), 10000 + frisquet::ReadTracker::kTimeoutMs + 1, kind));
+
+  // Retransmitted requests do not exhaust the table.
+  for (uint32_t i = 0; i < 50; ++i) tracker.on_frame(req_info.data(), req_info.size(), 20000 + i, kind);
+  CHECK(tracker.on_frame(ans_info.data(), ans_info.size(), 20100, kind));
+  CHECK(kind == ReadKind::kInfo);
+
+  // Boiler family offset and unknown addresses.
+  CHECK(frisquet::classify_read_address(0x79F2 + 0xC8) == ReadKind::kInfo);
+  CHECK(frisquet::classify_read_address(0x1234) == ReadKind::kUnknown);
+
+  // Frames that are not reads are ignored.
+  const Bytes &broadcast = F["payload_sat_broadcast"];
+  CHECK(!tracker.on_frame(broadcast.data(), broadcast.size(), 30000, kind));
 }
 
 static void check_repair(const char *raw_name, const char *payload_name, int8_t adjustment) {
@@ -262,6 +329,7 @@ int main() {
   test_zone_mode();
   test_activity();
   test_other_reads();
+  test_read_tracker();
   test_crc_repair();
   test_crc_valid_and_invalid();
   printf("%d checks, %d failures\n", g_checks, g_failures);

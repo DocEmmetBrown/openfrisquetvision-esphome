@@ -65,7 +65,7 @@ si elle ne permet pas la capture brute.
  │   modèle métier : Boiler, Zone×3, Programme, Dérogations             │
  │   émulateurs : Connect · Satellite×3 (physique/virtuel) · Sonde ext. │
  │               · Écouteur passif                                      │
- │   protocole : transactions Ask/Init/Answer, mémoire (0x79E0…0xA0F0)  │
+ │   protocole : transactions Ask/Init/Answer, mémoire (0x79E0…0xA0FC)  │
  │   liaison : en-tête, ack, retry, CRC16 + réparation 1 bit            │
  ├──────────────────────────────────────────────────────────────────────┤
  │ radio driver (RadioLib : SX1262 / SX1276, FEM KCT8103L)              │
@@ -244,7 +244,7 @@ openfrisquetvisio-esphome/
 **Tests**
 
 - **Hôte** : le cœur est rejoué avec des **trames réelles** (déjà disponibles dans les journaux RADIO : requêtes `79F2`,
-  `7A18`, `A063`, `A0F0`, trames d'écho de zone, trames avec réparation CRC). Résultats attendus = valeurs observées
+  `7A18`, `A063`, `A0FC`, trames d'écho de zone, trames avec réparation CRC). Résultats attendus = valeurs observées
   (ex. ECS 70,3 °C, pression 1,3 bar).
 - **Simulateur de chaudière** (hôte) pour tester associations, échecs, restauration du NetworkID, fenêtres silencieuses.
 - **CI** : compilation de chaque exemple pour chaque carte ; validation de la configuration.
@@ -257,7 +257,7 @@ openfrisquetvisio-esphome/
 | **R. Reflash distant** ✅ | Image ESPHome minimale ; OTA dans les deux sens ; `safe_mode` | MQTT→ESPHome→ESPHome→MQTT sans USB (voir 10.1) | non |
 | **0. Spike passif** | ESPHome + RadioLib en réception sur V4.3 ; FEM ; mesure du tas libre ; décision composant maison vs `sx126x` | Trames `08 80 FA` décodées dans HA, API stable | non |
 | **1. Cœur + lecture seule** | Cœur C++ + tests hôte ; capteurs issus des trames satellite ; diagnostics radio | Ambiante, consigne, mode, date, état corrects | non |
-| **2a. Lectures actives** | Identité Connect `0x7E`/`0xE3` ; ordonnanceur ; lectures `79F2`, `7A18`, `A063`, `A0F0`, `A02B` | Parité des **capteurs** avec le firmware MQTT | lectures seules |
+| **2a. Lectures actives** | Identité Connect `0x7E`/`0xE3` ; ordonnanceur ; lectures `79F2`, `7A18`, `A063`, `A0FC`, `A02B` | Parité des **capteurs** avec le firmware MQTT | lectures seules |
 | **2b. Écritures bas risque** | Mode ECS ; consignes Confort/Réduit/Hors gel (relecture) | Changement vérifié par relecture | écritures |
 | **2c. Zone complète** | Bloc de zone (modes, consignes, programme 42 octets) | Pilotage d'une zone depuis HA | écritures chauffage |
 | **2d. Association** | Associations, récupération du NetworkID, restauration garantie du sync word | Association échouée ⇒ radio sur le bon réseau | modifie le réseau |
@@ -281,7 +281,7 @@ déjà prouvée (même carte, mêmes options flash) et la radio est activée pro
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Option de compilation `frisquet: tx: none | read | write` ; `none` ne compile **aucun** chemin d'émission (phases R à 1).
-2. **Liste blanche** d'adresses par palier (2a : lectures ; 2b : `A0F0` ; 2c : bloc de zone).
+2. **Liste blanche** d'adresses par palier (2a : lectures ; 2b : `A0FC` ; 2c : bloc de zone).
 3. **Dry-run** : journalise la trame qui serait envoyée, à comparer aux trames du firmware MQTT avant activation.
 4. **Interrupteur d'arrêt d'urgence** dans HA, forcé à l'arrêt après un redémarrage anormal.
 5. Aucune écriture si l'heure ou le programme sont inconnus ; une tentative par créneau ; pas de rattrapage en rafale.

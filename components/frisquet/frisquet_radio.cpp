@@ -11,6 +11,9 @@ namespace frisquet_radio {
 
 static const char *const TAG = "frisquet_radio";
 
+static_assert(kSensorCount == FRISQUET_SENSOR_COUNT, "SensorId must match SENSORS in __init__.py");
+static_assert(kTextCount == FRISQUET_TEXT_COUNT, "TextId must match TEXT_SENSORS in __init__.py");
+
 // Heltec WiFi LoRa 32 V4.3 front-end module (KCT8103L).
 static constexpr uint8_t FEM_POWER_PIN = 7;
 static constexpr uint8_t FEM_ENABLE_PIN = 2;
@@ -112,13 +115,19 @@ void FrisquetRadio::rearm_(const char *reason) {
 
 void FrisquetRadio::loop() {
   if (this->radio_ == nullptr || this->is_failed()) return;
+  const uint32_t now = millis();
   if (g_rx_flag) {
     g_rx_flag = false;
     this->handle_packet_();
     this->rearm_("after packet");
-  } else if (millis() - this->last_arm_ms_ > 30000) {
+  } else if (now - this->last_arm_ms_ > 30000) {
     // Safety net against a lost interrupt or a chip that left RX.
     this->rearm_("watchdog");
+  }
+  if (this->frame_seen_ && millis() - this->last_age_publish_ms_ >= 30000) {
+    const uint32_t current = millis();
+    this->last_age_publish_ms_ = current;
+    this->publish_(kSecondsSinceFrame, (current - this->last_frame_ms_) / 1000.0f);
   }
 }
 
@@ -132,7 +141,6 @@ void FrisquetRadio::handle_packet_() {
     ESP_LOGW(TAG, "read failed: %d (irq=0x%04X)", state, irq);
     return;
   }
-  this->last_frame_ms_ = millis();
 
   if (length != ::frisquet::crc::kRawLength ||
       (irq & (RADIOLIB_SX126X_IRQ_CRC_ERR | RADIOLIB_SX126X_IRQ_HEADER_ERR)) ||
@@ -159,26 +167,89 @@ void FrisquetRadio::handle_packet_() {
   } else {
     this->valid_++;
   }
-  if (this->rssi_ != nullptr) this->rssi_->publish_state(rssi);
+  this->last_frame_ms_ = millis();
+  this->last_age_publish_ms_ = this->last_frame_ms_;
+  this->frame_seen_ = true;
+  this->publish_(kSecondsSinceFrame, 0.0f);
+  this->publish_(kRssi, rssi);
 
   ::frisquet::Header header;
   ::frisquet::parse_header(payload, result.length, header);
   ESP_LOGD(TAG, "RX %u bytes %02X->%02X type=%02X rssi=%.1f %s", static_cast<unsigned>(result.length),
            header.source, header.destination, header.type, rssi, format_hex_pretty(payload, result.length).c_str());
 
-  ::frisquet::SatelliteBroadcast broadcast;
-  if (::frisquet::decode_satellite_broadcast(payload, result.length, broadcast)) {
-    this->publish_satellite_broadcast_(broadcast);
-  } else {
-    this->ignored_++;
-  }
+  this->dispatch_(payload, result.length);
   this->publish_counters_();
 }
 
+void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
+  ::frisquet::SatelliteBroadcast broadcast;
+  if (::frisquet::decode_satellite_broadcast(payload, length, broadcast)) {
+    this->publish_satellite_broadcast_(broadcast);
+    return;
+  }
+
+  // Answers to a Connect's reads, overheard when a real Connect is on the air.
+  ::frisquet::ReadKind kind = ::frisquet::ReadKind::kUnknown;
+  if (!this->tracker_.on_frame(payload, length, millis(), kind)) {
+    this->ignored_++;
+    return;
+  }
+  switch (kind) {
+    case ::frisquet::ReadKind::kInfo: {
+      ::frisquet::BoilerInfo info;
+      if (::frisquet::decode_boiler_info(payload, length, info)) this->publish_info_(info);
+      break;
+    }
+    case ::frisquet::ReadKind::kConsumption: {
+      ::frisquet::Consumption consumption;
+      if (::frisquet::decode_consumption(payload, length, consumption)) {
+        if (consumption.hot_water >= 0) this->publish_(kConsumptionHotWater, consumption.hot_water);
+        if (consumption.heating >= 0) this->publish_(kConsumptionHeating, consumption.heating);
+      }
+      break;
+    }
+    case ::frisquet::ReadKind::kAnnualConsumption: {
+      ::frisquet::AnnualConsumption annual;
+      if (::frisquet::decode_annual_consumption(payload, length, annual)) {
+        this->publish_(kAnnualHotWater, annual.hot_water);
+        this->publish_(kAnnualHeating, annual.heating);
+      }
+      break;
+    }
+    case ::frisquet::ReadKind::kHotWaterMode: {
+      ::frisquet::DecodedHotWaterMode mode;
+      if (::frisquet::decode_hot_water_mode(payload, length, mode)) {
+        const char *name = "Inconnu";
+        switch (mode.mode) {
+          case ::frisquet::HotWaterMode::kMax: name = "Max"; break;
+          case ::frisquet::HotWaterMode::kEco: name = "Eco"; break;
+          case ::frisquet::HotWaterMode::kEcoScheduled: name = "Eco Horaires"; break;
+          case ::frisquet::HotWaterMode::kEcoPlus: name = "Eco+"; break;
+          case ::frisquet::HotWaterMode::kEcoPlusScheduled: name = "Eco+ Horaires"; break;
+          case ::frisquet::HotWaterMode::kStop: name = "Stop"; break;
+          default: break;
+        }
+        this->publish_text_(kHotWaterMode, name);
+      }
+      break;
+    }
+    default: break;
+  }
+}
+
+void FrisquetRadio::publish_(SensorId id, float value) {
+  if (this->sensors_[id] != nullptr && !std::isnan(value)) this->sensors_[id]->publish_state(value);
+}
+
+void FrisquetRadio::publish_text_(TextId id, const char *value) {
+  if (this->texts_[id] != nullptr) this->texts_[id]->publish_state(value);
+}
+
 void FrisquetRadio::publish_counters_() {
-  if (this->frames_valid_ != nullptr) this->frames_valid_->publish_state(this->valid_);
-  if (this->frames_repaired_ != nullptr) this->frames_repaired_->publish_state(this->repaired_);
-  if (this->frames_rejected_ != nullptr) this->frames_rejected_->publish_state(this->rejected_);
+  this->publish_(kFramesValid, this->valid_);
+  this->publish_(kFramesRepaired, this->repaired_);
+  this->publish_(kFramesRejected, this->rejected_);
 }
 
 static const char *zone_mode_name(::frisquet::ZoneMode mode) {
@@ -195,22 +266,46 @@ static const char *zone_mode_name(::frisquet::ZoneMode mode) {
 }
 
 void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroadcast &b) {
-  if (this->zone1_ambient_ != nullptr && !std::isnan(b.ambient[0])) this->zone1_ambient_->publish_state(b.ambient[0]);
-  if (this->zone1_setpoint_ != nullptr && !std::isnan(b.setpoint[0])) this->zone1_setpoint_->publish_state(b.setpoint[0]);
-  if (this->zone1_mode_ != nullptr) {
-    this->zone1_mode_->publish_state(zone_mode_name(::frisquet::decode_zone_mode(b.mode_raw[0]).mode));
+  this->publish_(kZone1Ambient, b.ambient[0]);
+  this->publish_(kZone1Setpoint, b.setpoint[0]);
+  this->publish_(kOutdoor, b.outdoor);
+  this->publish_text_(kZone1Mode, zone_mode_name(::frisquet::decode_zone_mode(b.mode_raw[0]).mode));
+
+  this->boiler_state_ = ::frisquet::decode_boiler_state(b.state_raw);
+  this->state_known_ = true;
+  this->publish_text_(kBoilerState, this->boiler_state_.fault ? "Anomalie"
+                                    : (this->boiler_state_.running ? "En marche" : "Veille"));
+  // The date is sent as BCD: 0x26 0x10 0x25 means 2026-10-25.
+  char text[24];
+  snprintf(text, sizeof(text), "20%02X-%02X-%02X %02X:%02X:%02X", b.year, b.month, b.day, b.hour, b.minute,
+           b.second);
+  this->publish_text_(kBoilerClock, text);
+  this->publish_activity_();
+}
+
+void FrisquetRadio::publish_info_(const ::frisquet::BoilerInfo &info) {
+  this->publish_(kZone1Ambient, info.ambient[0]);
+  this->publish_(kZone1Setpoint, info.setpoint[0]);
+  this->publish_(kHotWater, info.hot_water);
+  this->publish_(kHeatingBody, info.heating_body);
+  this->publish_(kOutdoor, info.outdoor);
+  this->publish_(kFlue, info.flue);
+  this->publish_(kZone1Flow, info.flow[0]);
+  this->publish_(kZone1FlowSetpoint, info.flow_setpoint[0]);
+  this->publish_(kPressure, info.pressure);
+  this->operating_mode_ = ::frisquet::decode_operating_mode(info.operating_mode_raw);
+  this->publish_activity_();
+}
+
+void FrisquetRadio::publish_activity_() {
+  const char *name = "Inconnu";
+  switch (::frisquet::boiler_activity(this->state_known_, this->boiler_state_, this->operating_mode_)) {
+    case ::frisquet::Activity::kStandby: name = "Veille"; break;
+    case ::frisquet::Activity::kHeating: name = "Chauffage"; break;
+    case ::frisquet::Activity::kHotWater: name = "Chauffage ECS"; break;
+    default: break;
   }
-  if (this->boiler_state_ != nullptr) {
-    const ::frisquet::BoilerState state = ::frisquet::decode_boiler_state(b.state_raw);
-    this->boiler_state_->publish_state(state.fault ? "Anomalie" : (state.running ? "En marche" : "Veille"));
-  }
-  if (this->boiler_clock_ != nullptr) {
-    // The date is sent as BCD: 0x26 0x10 0x25 means 2026-10-25.
-    char text[24];
-    snprintf(text, sizeof(text), "20%02X-%02X-%02X %02X:%02X:%02X", b.year, b.month, b.day, b.hour, b.minute,
-             b.second);
-    this->boiler_clock_->publish_state(text);
-  }
+  this->publish_text_(kBoilerActivity, name);
 }
 
 void FrisquetRadio::dump_config() {

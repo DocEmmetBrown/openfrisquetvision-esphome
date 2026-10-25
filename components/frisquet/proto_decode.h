@@ -191,7 +191,29 @@ inline bool decode_consumption(const uint8_t *frame, size_t length, Consumption 
   return true;
 }
 
-// 0xA0F0: hot-water mode, one byte. Bits 0x81 are frame bits to preserve when writing back.
+// 0xA063: current-year monthly consumption in kWh, January to December, heating then hot water
+// for each month (24 big-endian words, 55-byte answer). 0xA07B holds the previous year.
+struct AnnualConsumption {
+  int32_t heating = -1;
+  int32_t hot_water = -1;
+};
+
+inline bool decode_annual_consumption(const uint8_t *frame, size_t length, AnnualConsumption &out) {
+  Header header;
+  if (!parse_header(frame, length, header)) return false;
+  if (header.type != kRead || !header.is_ack() || header.source != kIdBoiler) return false;
+  if (length < 7 + 48 || frame[6] != 48) return false;
+  int32_t heating = 0, hot_water = 0;
+  for (int month = 0; month < 12; ++month) {
+    heating += be16(frame + 7 + month * 4);
+    hot_water += be16(frame + 7 + month * 4 + 2);
+  }
+  out.heating = heating;
+  out.hot_water = hot_water;
+  return true;
+}
+
+// 0xA0FC: hot-water mode, one byte. Bits 0x81 are frame bits to preserve when writing back.
 enum class HotWaterMode : uint8_t {
   kMax = 0x00,
   kEco = 0x08,

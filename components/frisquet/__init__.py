@@ -1,10 +1,12 @@
-"""Frisquet boiler radio (phase 0: passive receive only, no transmit path)."""
+"""Frisquet boiler radio (receive only: no transmit path exists in this build)."""
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
 from esphome.const import (
     CONF_ID,
+    DEVICE_CLASS_ENERGY,
+    DEVICE_CLASS_PRESSURE,
     DEVICE_CLASS_SIGNAL_STRENGTH,
     DEVICE_CLASS_TEMPERATURE,
     ENTITY_CATEGORY_DIAGNOSTIC,
@@ -12,6 +14,7 @@ from esphome.const import (
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_CELSIUS,
     UNIT_DECIBEL_MILLIWATT,
+    UNIT_SECOND,
 )
 
 DEPENDENCIES = ["esp32"]
@@ -37,19 +40,37 @@ RX_BANDWIDTHS = [
     117.3, 156.2, 187.2, 234.3, 312.0, 373.6, 467.0,
 ]
 
+
+def _temperature():
+    return sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        accuracy_decimals=1,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+    )
+
+
+def _counter():
+    return sensor.sensor_schema(
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    )
+
+
+def _energy_total():
+    return sensor.sensor_schema(
+        unit_of_measurement="kWh",
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+    )
+
+
+# The order below defines the C++ SensorId enum (frisquet_radio.h): keep both in sync.
 SENSORS = {
-    "zone1_ambient_temperature": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        accuracy_decimals=1,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-    ),
-    "zone1_setpoint": sensor.sensor_schema(
-        unit_of_measurement=UNIT_CELSIUS,
-        accuracy_decimals=1,
-        device_class=DEVICE_CLASS_TEMPERATURE,
-        state_class=STATE_CLASS_MEASUREMENT,
-    ),
+    "zone1_ambient_temperature": _temperature(),
+    "zone1_setpoint": _temperature(),
     "rssi": sensor.sensor_schema(
         unit_of_measurement=UNIT_DECIBEL_MILLIWATT,
         accuracy_decimals=1,
@@ -57,27 +78,45 @@ SENSORS = {
         state_class=STATE_CLASS_MEASUREMENT,
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
     ),
-    "frames_valid": sensor.sensor_schema(
+    "frames_valid": _counter(),
+    "frames_repaired": _counter(),
+    "frames_rejected": _counter(),
+    "seconds_since_frame": sensor.sensor_schema(
+        unit_of_measurement=UNIT_SECOND,
         accuracy_decimals=0,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
+        state_class=STATE_CLASS_MEASUREMENT,
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
     ),
-    "frames_repaired": sensor.sensor_schema(
-        accuracy_decimals=0,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    # Filled only when a Connect is on the air and its read answers are overheard.
+    "hot_water_temperature": _temperature(),
+    "heating_body_temperature": _temperature(),
+    "outdoor_temperature": _temperature(),
+    "flue_temperature": _temperature(),
+    "zone1_flow_temperature": _temperature(),
+    "zone1_flow_setpoint": _temperature(),
+    "pressure": sensor.sensor_schema(
+        unit_of_measurement="bar",
+        accuracy_decimals=2,
+        device_class=DEVICE_CLASS_PRESSURE,
+        state_class=STATE_CLASS_MEASUREMENT,
     ),
-    "frames_rejected": sensor.sensor_schema(
-        accuracy_decimals=0,
-        state_class=STATE_CLASS_TOTAL_INCREASING,
-        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    "consumption_hot_water": sensor.sensor_schema(
+        unit_of_measurement="kWh", accuracy_decimals=0, device_class=DEVICE_CLASS_ENERGY
     ),
+    "consumption_heating": sensor.sensor_schema(
+        unit_of_measurement="kWh", accuracy_decimals=0, device_class=DEVICE_CLASS_ENERGY
+    ),
+    "annual_consumption_hot_water": _energy_total(),
+    "annual_consumption_heating": _energy_total(),
 }
 
+# Same rule for the C++ TextId enum.
 TEXT_SENSORS = {
     "zone1_mode": text_sensor.text_sensor_schema(),
     "boiler_state": text_sensor.text_sensor_schema(),
     "boiler_clock": text_sensor.text_sensor_schema(),
+    "boiler_activity": text_sensor.text_sensor_schema(),
+    "hot_water_mode": text_sensor.text_sensor_schema(),
 }
 
 
@@ -102,7 +141,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(FrisquetRadio),
         cv.Required(CONF_BOARD): cv.one_of(*BOARDS, lower=True),
         cv.Required(CONF_NETWORK_ID): network_id,
-        # Phase 0 to 1: no transmit path is compiled or reachable.
+        # No transmit path is compiled or reachable in this build.
         cv.Optional(CONF_TX, default="none"): cv.one_of("none", lower=True),
         cv.Optional(CONF_RX_BANDWIDTH, default=234.3): cv.one_of(*RX_BANDWIDTHS, float=True),
         cv.Optional(CONF_LNA_BYPASS, default=False): cv.boolean,
@@ -118,6 +157,8 @@ async def to_code(config):
 
     cg.add_library("SPI", None)
     cg.add_library("jgromes/RadioLib", "7.8.1")
+    cg.add_define("FRISQUET_SENSOR_COUNT", len(SENSORS))
+    cg.add_define("FRISQUET_TEXT_COUNT", len(TEXT_SENSORS))
 
     board = BOARDS[config[CONF_BOARD]]
     cg.add(
@@ -132,11 +173,11 @@ async def to_code(config):
     cg.add(var.set_rx_bandwidth(config[CONF_RX_BANDWIDTH]))
     cg.add(var.set_lna_bypass(config[CONF_LNA_BYPASS]))
 
-    for key in SENSORS:
+    for index, key in enumerate(SENSORS):
         if key in config:
             sens = await sensor.new_sensor(config[key])
-            cg.add(getattr(var, f"set_{key}_sensor")(sens))
-    for key in TEXT_SENSORS:
+            cg.add(var.set_sensor(index, sens))
+    for index, key in enumerate(TEXT_SENSORS):
         if key in config:
             sens = await text_sensor.new_text_sensor(config[key])
-            cg.add(getattr(var, f"set_{key}_sensor")(sens))
+            cg.add(var.set_text_sensor(index, sens))

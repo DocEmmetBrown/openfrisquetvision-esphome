@@ -24,8 +24,16 @@ payload_sat_broadcast_plain = 08 80 FA 28 81 17 2A 05 0A 00 00 26 10 25 13 10 12
 # 0x7A18 consumption (both counters 0 on this boiler)
 payload_7a18 = 7E 80 E3 1A 81 03 38 00 01 4B 08 14 3C 4B 0F 14 50 4B 0F 14 50 07 13 00 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 08 27 00 FF 7E FF FF
 
-# 0xA0F0 hot-water mode: raw 0x90 = frame bit 0x80 + mode 0x10 (Eco scheduled)
-payload_a0f0 = 7E 80 E3 8F 81 03 02 00 90
+# 0xA0FC hot-water mode request and answer (13:07): raw 0x90 = frame bit 0x80 + mode 0x10 (Eco scheduled)
+payload_a0fc_request = 80 7E E3 1D 01 03 A0 FC 00 01
+payload_a0fc = 7E 80 E3 1D 81 03 02 00 90
+
+# 0x7A18 and 0xA063 requests
+payload_7a18_request = 80 7E E3 1A 01 03 7A 18 00 1C
+payload_a063_request = 80 7E E3 8D 01 03 A0 63 00 18
+
+# 0xA063 annual consumption answer (all months 0 on this boiler)
+payload_a063 = 7E 80 E3 8D 81 03 30 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 
 # Connect request (not an answer)
 payload_79f2_request = 80 7E E3 86 01 03 79 F2 00 1C

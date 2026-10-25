@@ -1,11 +1,11 @@
-# Phase 0 : spike passif. Réception seule, aucune émission radio (tx: none).
+# Phase 1 : écoute seule. Aucune émission radio (tx: none).
 # WiFi fourni par l'environnement : OFV_WIFI_SSID / OFV_WIFI_PASSWORD.
 esphome:
   name: frisquette
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.1.0-phase-0"
+    version: "0.1.1-phase-1"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -59,6 +59,8 @@ frisquet:
     name: Chaudière état
   boiler_clock:
     name: Chaudière horloge
+  seconds_since_frame:
+    name: Radio âge dernière trame
   rssi:
     name: Radio RSSI
     filters:
