@@ -13,6 +13,7 @@
 
 #include "../../components/frisquet/proto_crc.h"
 #include "../../components/frisquet/proto_decode.h"
+#include "../../components/frisquet/proto_schedule.h"
 #include "../../components/frisquet/proto_tracker.h"
 
 #ifndef FIXTURES
@@ -216,6 +217,55 @@ static void test_other_reads() {
   CHECK(!frisquet::decode_annual_consumption(wrong_length.data(), wrong_length.size(), annual));
 }
 
+static void test_slot_schedule() {
+  using namespace frisquet;
+  // Quiet window: first 150 s and last 30 s of every 10-minute cycle.
+  CHECK(in_quiet_window(0) && in_quiet_window(149) && !in_quiet_window(150));
+  CHECK(!in_quiet_window(569) && in_quiet_window(570) && in_quiet_window(599));
+  CHECK(in_quiet_window(6000 + 10));
+
+  SlotSchedule slot;
+  const uint32_t base = 1000000 * 600;  // aligned to a cycle
+  // :03 slot opens at +180 s and stays open 10 s; one attempt only.
+  CHECK(!slot.due(base + 179, 1000, 600, 180));
+  CHECK(slot.due(base + 180, 2000, 600, 180));
+  CHECK(!slot.due(base + 181, 3000, 600, 180));
+  CHECK(!slot.due(base + 189, 11000, 600, 180));
+  CHECK(!slot.due(base + 190, 12000, 600, 180));  // window closed
+  // Next cycle opens again.
+  CHECK(slot.due(base + 600 + 183, 2000 + 600000, 600, 180));
+
+  // A clock correction that replays the same slot must not trigger a second attempt.
+  SlotSchedule corrected;
+  CHECK(corrected.due(base + 360, 5000, 600, 360));
+  CHECK(!corrected.due(base + 362 - 30, 5500, 600, 360));
+  CHECK(!corrected.due(base + 365, 6000, 600, 360));
+
+  // Offsets inside the quiet window and invalid parameters never fire.
+  SlotSchedule other;
+  CHECK(!other.due(base + 60, 1, 600, 60));
+  CHECK(!other.due(base + 200, 1, 0, 0));
+  CHECK(!other.due(base + 200, 1, 600, 600));
+
+  // Hourly slots: :05 of the hour.
+  SlotSchedule hourly;
+  const uint32_t hour = 1000 * 3600;
+  CHECK(!hourly.due(hour + 299, 10, kConsumptionPeriod, kConsumptionOffset));
+  CHECK(hourly.due(hour + 300, 20, kConsumptionPeriod, kConsumptionOffset));
+  CHECK(!hourly.due(hour + 3600 + 300, 20 + 3000, kConsumptionPeriod, kConsumptionOffset));
+  CHECK(hourly.due(hour + 3600 + 300, 20 + 3600000, kConsumptionPeriod, kConsumptionOffset));
+
+  // millis() wrap: the elapsed time is computed with unsigned subtraction.
+  SlotSchedule wrapped;
+  CHECK(wrapped.due(base + 480, 0xFFFFFF00u, 600, 480));
+  CHECK(!wrapped.due(base + 481, 0x00000100u, 600, 480));
+  CHECK(wrapped.due(base + 600 + 480, 0xFFFFFF00u + 600000u, 600, 480));
+
+  // The default Connect slots are outside the quiet window.
+  for (uint32_t offset : kTemperatureOffsets) CHECK(!in_quiet_window(offset));
+  CHECK(!in_quiet_window(kConsumptionOffset) && !in_quiet_window(kHotWaterModeOffset));
+}
+
 static void test_read_tracker() {
   using frisquet::ReadKind;
   frisquet::ReadTracker tracker;
@@ -330,6 +380,7 @@ int main() {
   test_activity();
   test_other_reads();
   test_read_tracker();
+  test_slot_schedule();
   test_crc_repair();
   test_crc_valid_and_invalid();
   printf("%d checks, %d failures\n", g_checks, g_failures);
