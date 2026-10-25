@@ -6,4 +6,4 @@ native ESPHome** (sans broker MQTT).
 
 Basé sur le protocole rétro-conçu par [OpenFrisquetVisio](https://github.com/FreedomNX/OpenFrisquetVisio).
 
-> **Statut : phase de conception.** Voir [docs/DESIGN.md](docs/DESIGN.md). Aucun code n'est encore écrit.
+> **Statut : conception validée, phase R (reflash distant) terminée.** Voir [docs/DESIGN.md](docs/DESIGN.md). Dépôt privé (licence amont à clarifier).

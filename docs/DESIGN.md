@@ -252,26 +252,52 @@ openfrisquetvisio-esphome/
 
 **Feuille de route (chaque phase est livrable et réversible)**
 
-| Phase | Contenu | Critère de sortie |
-|---|---|---|
-| **0. Spike (go/no-go)** | ESPHome + RadioLib sur V4.3 ; API active ; réception de trames chaudière ; **une** lecture `79F2` depuis la tâche radio ; décision composant maison vs `sx126x` | Température ECS correcte dans HA, sans coupure API |
-| **1. Lecture seule** | Cœur + tests hôte ; écouteur passif ; capteurs chaudière/zones ; diagnostics | Parité des capteurs avec le firmware MQTT, **aucune émission** |
-| **2. Connect actif** | Lectures planifiées ; envoi de zone ; mode ECS ; association ; NetworkID | Pilotage d'une zone depuis HA |
-| **3. Satellites et sonde** | Satellite physique (écrasement), virtuel, sonde extérieure | Idem, avec capteurs HA |
-| **4. Programme et dérogations** | Option retenue en D1 ; blueprint | Auto + dérogations persistants |
-| **5. Finition** | Outils dev, migration, CI, autres cartes (V3, LilyGo) | Documentation + premier tag |
+| Phase | Contenu | Critère de sortie | Émission |
+|---|---|---|---|
+| **R. Reflash distant** ✅ | Image ESPHome minimale ; OTA dans les deux sens ; `safe_mode` | MQTT→ESPHome→ESPHome→MQTT sans USB (voir 10.1) | non |
+| **0. Spike passif** | ESPHome + RadioLib en réception sur V4.3 ; FEM ; mesure du tas libre ; décision composant maison vs `sx126x` | Trames `08 80 FA` décodées dans HA, API stable | non |
+| **1. Cœur + lecture seule** | Cœur C++ + tests hôte ; capteurs issus des trames satellite ; diagnostics radio | Ambiante, consigne, mode, date, état corrects | non |
+| **2a. Lectures actives** | Identité Connect `0x7E`/`0xE3` ; ordonnanceur ; lectures `79F2`, `7A18`, `A063`, `A0F0`, `A02B` | Parité des **capteurs** avec le firmware MQTT | lectures seules |
+| **2b. Écritures bas risque** | Mode ECS ; consignes Confort/Réduit/Hors gel (relecture) | Changement vérifié par relecture | écritures |
+| **2c. Zone complète** | Bloc de zone (modes, consignes, programme 42 octets) | Pilotage d'une zone depuis HA | écritures chauffage |
+| **2d. Association** | Associations, récupération du NetworkID, restauration garantie du sync word | Association échouée ⇒ radio sur le bon réseau | modifie le réseau |
+| **3. Satellites et sonde** | Satellite physique (écrasement), virtuel, sonde extérieure | Idem, avec capteurs HA | oui |
+| **4. Programme et dérogations** | Option retenue en D1 ; blueprint | Auto + dérogations persistants | oui |
+| **5. Finition** | Outils dev, migration, CI, autres cartes (V3, LilyGo) | Documentation + premier tag | oui |
 
-## 11. Décisions à valider
+### 10.1 Résultat de la phase R (25/10/2026)
 
-| # | Question | Recommandation |
+Carte unique Heltec V4.3, firmware MQTT d'origine, **aucun accès USB** :
+
+1. MQTT → ESPHome 2026.10.0 (image minimale, 827 Ko) par `POST /api/update` du portail : OK, même IP, API sur 6053.
+2. ESPHome → ESPHome par `esphome upload` : OK (168 s à −72 dBm ; prévoir des OTA lentes).
+3. ESPHome → firmware MQTT (`esphome upload --file`) : OK ; configuration et programme **identiques** après retour, radio opérationnelle.
+
+Constats : l'OTA ne change ni bootloader ni partitions (conservés : slots de 6,5 Mo) ; le bootloader actuel ne gère pas le
+« rollback OTA » d'ESP-IDF (avertissement ESPHome), mais `safe_mode` est actif. **Risque résiduel** : une image qui échoue très tôt
+au démarrage, avant `safe_mode`, ne se récupère pas à distance. Chaque nouvelle image reste donc de la **même famille** que l'image
+déjà prouvée (même carte, mêmes options flash) et la radio est activée progressivement.
+
+### 10.2 Garde-fous d'émission (phases 2a à 5)
+
+1. Option de compilation `frisquet: tx: none | read | write` ; `none` ne compile **aucun** chemin d'émission (phases R à 1).
+2. **Liste blanche** d'adresses par palier (2a : lectures ; 2b : `A0F0` ; 2c : bloc de zone).
+3. **Dry-run** : journalise la trame qui serait envoyée, à comparer aux trames du firmware MQTT avant activation.
+4. **Interrupteur d'arrêt d'urgence** dans HA, forcé à l'arrêt après un redémarrage anormal.
+5. Aucune écriture si l'heure ou le programme sont inconnus ; une tentative par créneau ; pas de rattrapage en rafale.
+6. Restauration du NetworkID / sync word par garde RAII, avec test hôte (régression du bug corrigé le 25/10).
+
+## 11. Décisions
+
+| # | Question | Décision (validée le 25/10/2026) |
 |---|---|---|
 | **D1** | Propriété du programme (section 6) | **C. Hybride** |
-| **D2** | Composant radio : RadioLib maison ou `sx126x` officiel | **RadioLib maison**, spike pour confirmer |
+| **D2** | Composant radio : RadioLib maison ou `sx126x` officiel | **RadioLib maison** ; le spike confirme |
 | **D3** | Cible initiale | **Heltec V4.3 seul** (V3 et LilyGo en phase 5) |
-| **D4** | Coexistence avec le firmware MQTT | **Non** : une seule émulation du Connect à la fois. Développer sur une **deuxième carte** si possible, sinon phase 1 (lecture seule) d'abord |
-| **D5** | Compatibilité des identifiants d'entités avec l'ancien firmware | Non reproduite à l'identique ; table de correspondance dans `MIGRATION.md` |
-| **D6** | **Licence / attribution** : le dépôt amont n'a **aucun fichier LICENSE** (droits réservés par défaut). Réutiliser son code (RadioCrc, adresses mémoire, structures de trames) suppose l'accord de son auteur (FreedomNX). | Contacter l'auteur avant toute publication ; en attendant, dépôt **local/privé** |
-| **D7** | Langue des entités et de la documentation | Français (noms d'entités) + anglais pour le code |
+| **D4** | Matériel | **Une seule carte**, **reflash 100 % à distance** (pas d'USB). Lecture seule d'abord ; les lectures actives (2a) sont avancées juste après le spike passif. Pas de coexistence : un seul émulateur du Connect à la fois |
+| **D5** | Identifiants d'entités | Non reproduits à l'identique ; table de correspondance dans `MIGRATION.md` |
+| **D6** | **Licence / attribution** : le dépôt amont n'a **aucun fichier LICENSE**. Réutiliser son code (CRC, adresses mémoire, structures de trames) suppose l'accord de FreedomNX | Dépôt **privé** tant que ce point n'est pas clarifié ; aucune publication |
+| **D7** | Langue | Français (entités, docs) + anglais (code) |
 
 ## 12. Risques
 

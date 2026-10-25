@@ -1,0 +1,45 @@
+# Phase R : image minimale pour prouver le reflash distant. Aucun code radio.
+# WiFi fourni par l'environnement : OFV_WIFI_SSID / OFV_WIFI_PASSWORD.
+esphome:
+  name: frisquette
+  friendly_name: Frisquette
+  project:
+    name: openfrisquetvisio.esphome
+    version: "0.0.2-phase-r"
+  platformio_options:
+    board_build.flash_mode: qio
+    board_build.f_flash: 80000000L
+    board_build.f_cpu: 240000000L
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+logger:
+
+wifi:
+  ssid: !env_var OFV_WIFI_SSID
+  password: !env_var OFV_WIFI_PASSWORD
+  reboot_timeout: 5min
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: WiFi signal
+    update_interval: 60s
+
+text_sensor:
+  - platform: version
+    name: ESPHome version
