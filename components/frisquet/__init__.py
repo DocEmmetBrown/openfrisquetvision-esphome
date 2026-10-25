@@ -1,0 +1,142 @@
+"""Frisquet boiler radio (phase 0: passive receive only, no transmit path)."""
+
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import sensor, text_sensor
+from esphome.const import (
+    CONF_ID,
+    DEVICE_CLASS_SIGNAL_STRENGTH,
+    DEVICE_CLASS_TEMPERATURE,
+    ENTITY_CATEGORY_DIAGNOSTIC,
+    STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
+    UNIT_CELSIUS,
+    UNIT_DECIBEL_MILLIWATT,
+)
+
+DEPENDENCIES = ["esp32"]
+CODEOWNERS = []
+
+frisquet_ns = cg.esphome_ns.namespace("frisquet_radio")
+FrisquetRadio = frisquet_ns.class_("FrisquetRadio", cg.Component)
+
+CONF_TX = "tx"
+CONF_NETWORK_ID = "network_id"
+CONF_BOARD = "board"
+CONF_RX_BANDWIDTH = "rx_bandwidth"
+CONF_LNA_BYPASS = "lna_bypass"
+
+BOARDS = {
+    # Heltec WiFi LoRa 32 V4.3: SX1262 + KCT8103L front-end module.
+    "heltec_v4_3": dict(cs=8, irq=14, reset=12, busy=13, sck=9, miso=11, mosi=10, fem=True),
+}
+
+# SX1262 GFSK receive bandwidths accepted by RadioLib (kHz).
+RX_BANDWIDTHS = [
+    4.8, 5.8, 7.3, 9.7, 11.7, 14.6, 19.5, 23.4, 29.3, 39.0, 46.9, 58.6, 78.2, 93.8,
+    117.3, 156.2, 187.2, 234.3, 312.0, 373.6, 467.0,
+]
+
+SENSORS = {
+    "zone1_ambient_temperature": sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        accuracy_decimals=1,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+    ),
+    "zone1_setpoint": sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        accuracy_decimals=1,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        state_class=STATE_CLASS_MEASUREMENT,
+    ),
+    "rssi": sensor.sensor_schema(
+        unit_of_measurement=UNIT_DECIBEL_MILLIWATT,
+        accuracy_decimals=1,
+        device_class=DEVICE_CLASS_SIGNAL_STRENGTH,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "frames_valid": sensor.sensor_schema(
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "frames_repaired": sensor.sensor_schema(
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "frames_rejected": sensor.sensor_schema(
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+}
+
+TEXT_SENSORS = {
+    "zone1_mode": text_sensor.text_sensor_schema(),
+    "boiler_state": text_sensor.text_sensor_schema(),
+    "boiler_clock": text_sensor.text_sensor_schema(),
+}
+
+
+def network_id(value):
+    value = cv.string_strict(value)
+    parts = value.split(":")
+    if len(parts) != 4:
+        raise cv.Invalid("network_id must look like AA:BB:CC:DD")
+    try:
+        octets = [int(part, 16) for part in parts]
+    except ValueError as err:
+        raise cv.Invalid("network_id must be hexadecimal") from err
+    if any(not 0 <= octet <= 255 for octet in octets):
+        raise cv.Invalid("network_id bytes must be 00..FF")
+    if octets == [0xFF] * 4:
+        raise cv.Invalid("FF:FF:FF:FF is the broadcast network used for pairing")
+    return octets
+
+
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(FrisquetRadio),
+        cv.Required(CONF_BOARD): cv.one_of(*BOARDS, lower=True),
+        cv.Required(CONF_NETWORK_ID): network_id,
+        # Phase 0 to 1: no transmit path is compiled or reachable.
+        cv.Optional(CONF_TX, default="none"): cv.one_of("none", lower=True),
+        cv.Optional(CONF_RX_BANDWIDTH, default=234.3): cv.one_of(*RX_BANDWIDTHS, float=True),
+        cv.Optional(CONF_LNA_BYPASS, default=False): cv.boolean,
+        **{cv.Optional(key): schema for key, schema in SENSORS.items()},
+        **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
+    }
+).extend(cv.COMPONENT_SCHEMA)
+
+
+async def to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+
+    cg.add_library("SPI", None)
+    cg.add_library("jgromes/RadioLib", "7.8.1")
+
+    board = BOARDS[config[CONF_BOARD]]
+    cg.add(
+        var.set_pins(
+            board["cs"], board["irq"], board["reset"], board["busy"],
+            board["sck"], board["miso"], board["mosi"],
+        )
+    )
+    cg.add(var.set_fem_heltec_v4_3(board["fem"]))
+    octets = config[CONF_NETWORK_ID]
+    cg.add(var.set_network_id(octets[0], octets[1], octets[2], octets[3]))
+    cg.add(var.set_rx_bandwidth(config[CONF_RX_BANDWIDTH]))
+    cg.add(var.set_lna_bypass(config[CONF_LNA_BYPASS]))
+
+    for key in SENSORS:
+        if key in config:
+            sens = await sensor.new_sensor(config[key])
+            cg.add(getattr(var, f"set_{key}_sensor")(sens))
+    for key in TEXT_SENSORS:
+        if key in config:
+            sens = await text_sensor.new_text_sensor(config[key])
+            cg.add(getattr(var, f"set_{key}_sensor")(sens))

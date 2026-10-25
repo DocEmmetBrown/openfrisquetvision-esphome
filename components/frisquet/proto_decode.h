@@ -4,7 +4,7 @@
 // reverse engineering; anything not yet confirmed on real traffic is marked "unverified".
 #include <math.h>
 
-#include "codec.h"
+#include "proto_codec.h"
 
 namespace frisquet {
 

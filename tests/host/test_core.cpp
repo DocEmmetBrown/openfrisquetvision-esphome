@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "../../components/frisquet/core/crc.h"
-#include "../../components/frisquet/core/decode.h"
+#include "../../components/frisquet/proto_crc.h"
+#include "../../components/frisquet/proto_decode.h"
 
 #ifndef FIXTURES
 #define FIXTURES "tests/fixtures/frames.txt"
