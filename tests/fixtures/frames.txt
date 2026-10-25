@@ -1,0 +1,31 @@
+# Real frames captured on the boiler on 2026-10-25 (Heltec V4.3, 868.96 MHz GFSK).
+# Format: name = hex bytes. "payload" frames are CRC-validated payloads (sync word and CRC removed).
+# "raw" frames are the 68-byte pre-repair captures: length byte, payload, CRC, margin.
+
+# 0x79F2 read response, burner idle (ECS 74.2, CDC 78.2, 1.40 bar)
+payload_79f2_idle = 7E 80 E3 86 81 03 38 00 BA 04 F6 04 F6 01 42 00 C6 00 C6 00 C8 00 00 00 00 05 0A 02 E6 03 0E 01 20 04 F6 04 F6 01 40 00 00 00 00 00 00 00 00 1C 00 00 09 03 20 00 00 00 00 00 00 00 00 00 00
+
+# 0x79F2 read response, burner firing: flue gas 0x0999 (122.85 C), ECS 64.4, CDC 60.0, 1.55 bar
+payload_79f2_firing = 7E 80 E3 90 81 03 38 00 BA 04 F6 04 F6 01 F6 00 C6 00 C6 00 C8 00 00 00 00 05 0A 02 84 02 58 01 D1 04 F6 04 F6 01 3A 09 99 00 00 00 00 00 00 1F 00 00 09 03 20 00 00 00 00 00 00 00 00 00 00
+
+# Same frames as received before CRC repair (a zero bit was removed: adjustment -1)
+raw_79f2_firing_removed_zero = 3F 7E 80 E3 90 81 03 38 00 BA 04 F6 04 F6 01 F6 00 C6 00 C6 00 C8 00 00 00 00 05 0A 02 84 02 58 01 D1 04 F6 04 F6 01 3A 09 99 00 00 00 00 00 00 1F 00 00 09 03 20 00 00 00 00 00 00 00 00 00 00 5B 2B 15 55
+
+# 0x79F2 read response with flue 0x0979, and its raw capture (a zero bit was inserted: adjustment +1)
+payload_79f2_firing2 = 7E 80 E3 18 81 03 38 00 C5 04 F6 04 F6 01 29 00 C6 00 C6 00 BE 00 00 00 00 05 0A 01 04 02 EB 02 53 04 F6 04 F6 01 25 09 79 00 00 00 00 00 00 22 80 00 0B 03 20 00 00 00 00 00 00 00 00 00 00
+raw_79f2_firing2_inserted_zero = 3F 7E 80 E3 18 81 03 38 00 C5 04 F6 04 F6 01 29 00 C6 00 C6 00 BE 00 00 00 00 05 0A 01 04 02 EB 02 53 04 F6 04 F6 01 25 09 79 00 00 00 00 00 00 22 80 00 0B 03 20 00 00 00 00 00 00 00 00 00 00 22 8A 55 55
+
+# Boiler -> zone-1 satellite broadcast, 2026-10-25 17:57:03, mode byte 0x25 (0x05 with the Connect-compat bit)
+payload_sat_broadcast = 08 80 FA C0 81 17 2A 05 0A 00 00 26 10 25 17 57 03 28 00 00 BA 00 C8 00 25 00 00 01 1A 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
+
+# Same kind of broadcast at 13:10:12, plain mode byte 0x05
+payload_sat_broadcast_plain = 08 80 FA 28 81 17 2A 05 0A 00 00 26 10 25 13 10 12 28 00 00 C8 00 BE 00 05 01 29 00 FF 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
+
+# 0x7A18 consumption (both counters 0 on this boiler)
+payload_7a18 = 7E 80 E3 1A 81 03 38 00 01 4B 08 14 3C 4B 0F 14 50 4B 0F 14 50 07 13 00 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 08 27 00 FF 7E FF FF
+
+# 0xA0F0 hot-water mode: raw 0x90 = frame bit 0x80 + mode 0x10 (Eco scheduled)
+payload_a0f0 = 7E 80 E3 8F 81 03 02 00 90
+
+# Connect request (not an answer)
+payload_79f2_request = 80 7E E3 86 01 03 79 F2 00 1C
