@@ -120,21 +120,25 @@ inline ZoneMode zone_mode_direct(uint8_t value) {
   }
 }
 
-// The broadcast byte is the zone's "options" byte. Verified on 2026-10-26 with the satellite left in
-// Auto while the programme switched from comfort to reduced: the zone block keeps mode 0x05 (auto)
-// and the options byte goes from 0x25 to 0x20. So 0x20 is "Auto, reduced", not permanent reduced.
-// (Permanent reduced was verified too: broadcast 0x00, zone block mode 0x07 / options 0x00.)
+// The broadcast byte is the zone's "options" byte as the satellite reports it. Verified on 2026-10-26,
+// satellite left in Auto while the programme moved between comfort and reduced:
+//   Auto, comfort  -> 0x25 or 0x21 (the 0x04 bit depends on what the Connect last wrote back)
+//   Auto, reduced  -> 0x20
+//   Reduced (manual, permanent) -> 0x00, with zone block mode 0x07
+// So bit 0x20 marks an Auto-family value, bit 0x01 means comfort, and 0x00 alone is permanent reduced.
+// Values without the 0x20 flag follow the older table (0x05 = auto comfort seen on 2026-10-25).
 inline DecodedZoneMode decode_zone_mode(uint8_t raw) {
   DecodedZoneMode out;
-  if (raw == 0x20) {
-    out.mode = ZoneMode::kReducedAuto;
+  if (raw & 0xC0) return out;  // unknown high bits (e.g. a boost flag)
+  if (raw & kConnectCompatXor) {
     out.connect_compat = true;
+    const uint8_t low = raw & 0x1F;
+    if (low & 0x10) out.mode = ZoneMode::kFrostProtection;
+    else if (low & 0x02) out.mode = (low & 0x01) ? ZoneMode::kComfortOverride : ZoneMode::kReducedOverride;
+    else out.mode = (low & 0x01) ? ZoneMode::kComfortAuto : ZoneMode::kReducedAuto;
     return out;
   }
   out.mode = zone_mode_direct(raw);
-  if (out.mode != ZoneMode::kUnknown) return out;
-  out.mode = zone_mode_direct(raw ^ kConnectCompatXor);
-  out.connect_compat = out.mode != ZoneMode::kUnknown;
   return out;
 }
 

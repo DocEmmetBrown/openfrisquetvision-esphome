@@ -589,6 +589,13 @@ static void test_zone_mode() {
   CHECK_NEAR(b.setpoint[0], 17.0f, 0.001f);
   CHECK(!frisquet::decode_boiler_state(b.state_raw).running);
   CHECK(frisquet::decode_zone_mode(0x25).mode == frisquet::ZoneMode::kComfortAuto);
+  CHECK(frisquet::decode_zone_mode(0x21).mode == frisquet::ZoneMode::kComfortAuto);  // seen 10:37 after the restore
+  CHECK(frisquet::decode_zone_mode(0x21).connect_compat);
+  CHECK(frisquet::decode_zone_mode(0x01).mode == frisquet::ZoneMode::kComfortPermanent);
+  CHECK(frisquet::decode_zone_mode(0x23).mode == frisquet::ZoneMode::kComfortOverride);
+  CHECK(frisquet::decode_zone_mode(0x22).mode == frisquet::ZoneMode::kReducedOverride);
+  CHECK(frisquet::decode_zone_mode(0x24).mode == frisquet::ZoneMode::kReducedAuto);
+  CHECK(frisquet::decode_zone_mode(0x40).mode == frisquet::ZoneMode::kUnknown);
   CHECK(frisquet::decode_zone_mode(0x00).mode == frisquet::ZoneMode::kReducedPermanent);
   CHECK(!frisquet::decode_zone_mode(0x00).connect_compat);
   CHECK(frisquet::decode_zone_mode(0x05).mode == frisquet::ZoneMode::kComfortAuto);
