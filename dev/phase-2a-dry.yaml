@@ -1,0 +1,124 @@
+# Phase 2a, dry-run : le moteur Connect tourne mais RIEN n'est émis (dry_run: true).
+# Chaque trame qu'il enverrait est journalisée avec le verdict de la porte (« TX DRY_RUN … »).
+# WiFi fourni par l'environnement : OFV_WIFI_SSID / OFV_WIFI_PASSWORD.
+esphome:
+  name: frisquette
+  friendly_name: Frisquette
+  project:
+    name: openfrisquetvisio.esphome
+    version: "0.2.0-phase-2a-dry"
+  platformio_options:
+    board_build.flash_mode: qio
+    board_build.f_flash: 80000000L
+    board_build.f_cpu: 240000000L
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [frisquet]
+
+logger:
+  level: DEBUG
+
+wifi:
+  ssid: !env_var OFV_WIFI_SSID
+  password: !env_var OFV_WIFI_PASSWORD
+  reboot_timeout: 5min
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+debug:
+  update_interval: 30s
+
+frisquet:
+  board: heltec_v4_3
+  network_id: "05:D9:8D:C9"
+  tx: ack
+  dry_run: true
+  association: 0xE3
+  acks_sent:
+    name: Radio accusés envoyés
+  reads_ok:
+    name: Radio lectures réussies
+  reads_failed:
+    name: Radio lectures échouées
+  tx_dry_runs:
+    name: Radio trames simulées
+  tx_blocked:
+    name: Radio trames bloquées
+  rx_bandwidth: 234.3
+  lna_bypass: false
+  zone1_ambient_temperature:
+    name: Zone 1 température ambiante
+  zone1_setpoint:
+    name: Zone 1 consigne
+  zone1_mode:
+    name: Zone 1 mode
+  boiler_state:
+    name: Chaudière état
+  boiler_clock:
+    name: Chaudière horloge
+  zone1_raw:
+    name: Zone 1 octets bruts
+  zone_block:
+    name: Zone dernier bloc de configuration
+  seconds_since_frame:
+    name: Radio âge dernière trame
+  rssi:
+    name: Radio RSSI
+    filters:
+      - throttle: 60s
+  frames_valid:
+    name: Radio trames valides
+    filters:
+      - throttle: 60s
+  frames_repaired:
+    name: Radio trames réparées
+    filters:
+      - throttle: 60s
+  frames_rejected:
+    name: Radio trames rejetées
+    filters:
+      - throttle: 60s
+
+switch:
+  - platform: frisquet
+    name: Radio arrêt d'urgence
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: WiFi signal
+    update_interval: 60s
+  - platform: debug
+    free:
+      name: Heap libre
+    block:
+      name: Heap bloc max
+    loop_time:
+      name: Durée de boucle
+    cpu_frequency:
+      name: Fréquence CPU
+
+text_sensor:
+  - platform: debug
+    reset_reason:
+      name: Raison du dernier reset
+  - platform: version
+    name: ESPHome version

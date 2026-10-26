@@ -19,8 +19,15 @@ static constexpr uint8_t FEM_POWER_PIN = 7;
 static constexpr uint8_t FEM_ENABLE_PIN = 2;
 static constexpr uint8_t FEM_CTX_PIN = 5;
 
+// The MQTT firmware waits 30 ms before every transmission; so do we.
+static constexpr uint32_t TX_DELAY_MS = 30;
+
 static volatile bool g_rx_flag = false;
-static void IRAM_ATTR on_rx_irq() { g_rx_flag = true; }
+// The receive interrupt pin also signals "transmit done": ignore it while transmitting.
+static volatile bool g_ignore_irq = false;
+static void IRAM_ATTR on_rx_irq() {
+  if (!g_ignore_irq) g_rx_flag = true;
+}
 
 int16_t RawRadio::arm() {
   int16_t state = standby();
@@ -53,6 +60,25 @@ int16_t RawRadio::read_raw(uint8_t *raw, size_t &length, uint16_t &irq) {
   return clearIrqStatus();
 }
 
+#ifdef FRISQUET_TX_ENABLED
+int16_t RawRadio::transmit_frame(const uint8_t *data, size_t length) {
+  int16_t state = standby();
+  if (state != RADIOLIB_ERR_NONE) return state;
+  state = setCRC(2, 0x1D0F, 0x1021, true);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  state = variablePacketLengthMode(::frisquet::crc::kMaxPayload);
+  if (state != RADIOLIB_ERR_NONE) return state;
+  return SX1262::transmit(data, length);
+}
+#endif
+
+void FrisquetRadio::set_kill_switch(bool killed) {
+  this->killed_ = killed;
+#ifdef FRISQUET_TX_ENABLED
+  this->engine_.set_kill_switch(killed);
+#endif
+}
+
 void FrisquetRadio::setup() {
   if (this->fem_) {
     pinMode(FEM_POWER_PIN, OUTPUT);
@@ -76,7 +102,7 @@ void FrisquetRadio::setup() {
       };
       this->radio_->setRfSwitchTable(pins, table);
     } else {
-      // CTX low in RX keeps the LNA in the path.
+      // CTX low in RX keeps the LNA in the path, high in TX selects the PA.
       this->radio_->setRfSwitchPins(RADIOLIB_NC, FEM_CTX_PIN);
     }
   }
@@ -100,6 +126,18 @@ void FrisquetRadio::setup() {
     return;
   }
   this->radio_->setPacketReceivedAction(on_rx_irq);
+
+#ifdef FRISQUET_TX_ENABLED
+  ::frisquet::TxPolicy policy;
+  policy.level = this->tx_level_ >= 2 ? ::frisquet::TxLevel::kAck : ::frisquet::TxLevel::kRead;
+  policy.dry_run = this->dry_run_;
+  policy.kill_switch = this->killed_;
+  policy.self_id = ::frisquet::kIdConnect;
+  policy.association = this->association_;
+  this->engine_.set_policy(policy);
+  this->engine_.set_next_message_id(static_cast<uint8_t>(random_uint32() & 0xFF));
+  this->engine_.request_initial_reads();
+#endif
   this->rearm_("setup");
 }
 
@@ -124,12 +162,70 @@ void FrisquetRadio::loop() {
     // Safety net against a lost interrupt or a chip that left RX.
     this->rearm_("watchdog");
   }
+#ifdef FRISQUET_TX_ENABLED
+  this->tx_step_(millis());
+#endif
   if (this->frame_seen_ && millis() - this->last_age_publish_ms_ >= 30000) {
     const uint32_t current = millis();
     this->last_age_publish_ms_ = current;
     this->publish_(kSecondsSinceFrame, (current - this->last_frame_ms_) / 1000.0f);
   }
 }
+
+#ifdef FRISQUET_TX_ENABLED
+static const char *tx_kind_name(::frisquet::TxClass kind) {
+  switch (kind) {
+    case ::frisquet::TxClass::kReadRequest: return "read";
+    case ::frisquet::TxClass::kZoneAck: return "zone-ack";
+    default: return "?";
+  }
+}
+
+void FrisquetRadio::tx_step_(uint32_t now) {
+  if (this->pending_tx_valid_) {
+    if (static_cast<int32_t>(now - this->pending_tx_due_ms_) >= 0) this->transmit_pending_();
+    return;
+  }
+  ::frisquet::TxRequest tx;
+  if (this->engine_.poll(now, tx)) {
+    // Every frame the engine wants to send is logged with the gate's verdict, sent or not.
+    ESP_LOGI(TAG, "TX %s %s %s", ::frisquet::verdict_name(tx.verdict), tx_kind_name(tx.kind),
+             format_hex_pretty(tx.frame, tx.length).c_str());
+    if (tx.verdict == ::frisquet::TxVerdict::kSend) {
+      this->pending_tx_ = tx;
+      this->pending_tx_valid_ = true;
+      this->pending_tx_due_ms_ = now + TX_DELAY_MS;
+    }
+  }
+  if (now - this->last_stats_ms_ >= 5000) {
+    this->last_stats_ms_ = now;
+    const ::frisquet::EngineStats &s = this->engine_.stats();
+    this->publish_(kAcksSent, s.acks_sent);
+    this->publish_(kReadsOk, s.reads_ok);
+    this->publish_(kReadsFailed, s.reads_failed);
+    this->publish_(kTxDryRuns, s.dry_runs);
+    this->publish_(kTxBlocked, s.blocked + s.acks_blocked);
+  }
+}
+
+void FrisquetRadio::transmit_pending_() {
+  this->pending_tx_valid_ = false;
+  // The kill switch can be engaged during the 30 ms wait: honour it right before transmitting.
+  if (this->killed_) {
+    ESP_LOGW(TAG, "TX cancelled by the kill switch");
+    return;
+  }
+  g_ignore_irq = true;
+  const int16_t state = this->radio_->transmit_frame(this->pending_tx_.frame, this->pending_tx_.length);
+  g_ignore_irq = false;
+  g_rx_flag = false;
+  if (state != RADIOLIB_ERR_NONE) {
+    this->tx_errors_++;
+    ESP_LOGW(TAG, "transmit failed: %d", state);
+  }
+  this->rearm_("after tx");
+}
+#endif
 
 void FrisquetRadio::handle_packet_() {
   uint8_t raw[::frisquet::crc::kRawLength] = {};
@@ -178,6 +274,13 @@ void FrisquetRadio::handle_packet_() {
   ESP_LOGD(TAG, "RX %u bytes %02X->%02X type=%02X rssi=%.1f %s", static_cast<unsigned>(result.length),
            header.source, header.destination, header.type, rssi, format_hex_pretty(payload, result.length).c_str());
 
+#ifdef FRISQUET_TX_ENABLED
+  // The engine sees every frame: relays to acknowledge, and the answers to its own reads.
+  ::frisquet::ReadResult read;
+  if (this->engine_.on_frame(millis(), payload, result.length, read)) {
+    this->publish_read_(read.kind, read.frame, read.length);
+  }
+#endif
   this->dispatch_(payload, result.length);
   this->publish_counters_();
 }
@@ -201,11 +304,13 @@ void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
       this->last_zone_block_ = text;
       this->publish_text_(kZoneBlock, text);
     }
-    // Dry run: show the acknowledgement a Connect would send. Nothing is transmitted.
+#ifndef FRISQUET_TX_ENABLED
+    // Listen-only build: show the acknowledgement a Connect would send. Nothing is transmitted.
     uint8_t ack[::frisquet::kZoneAckLength];
     if (::frisquet::build_zone_ack(payload, length, ::frisquet::kIdConnect, ack, sizeof(ack)) > 0) {
       ESP_LOGD(TAG, "DRY-RUN ack (not sent) id=%02X: %s", payload[3], format_hex_pretty(ack, sizeof(ack)).c_str());
     }
+#endif
     return;
   }
 
@@ -215,15 +320,19 @@ void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
     this->ignored_++;
     return;
   }
+  this->publish_read_(kind, payload, length);
+}
+
+void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *frame, size_t length) {
   switch (kind) {
     case ::frisquet::ReadKind::kInfo: {
       ::frisquet::BoilerInfo info;
-      if (::frisquet::decode_boiler_info(payload, length, info)) this->publish_info_(info);
+      if (::frisquet::decode_boiler_info(frame, length, info)) this->publish_info_(info);
       break;
     }
     case ::frisquet::ReadKind::kConsumption: {
       ::frisquet::Consumption consumption;
-      if (::frisquet::decode_consumption(payload, length, consumption)) {
+      if (::frisquet::decode_consumption(frame, length, consumption)) {
         if (consumption.hot_water >= 0) this->publish_(kConsumptionHotWater, consumption.hot_water);
         if (consumption.heating >= 0) this->publish_(kConsumptionHeating, consumption.heating);
       }
@@ -231,7 +340,7 @@ void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
     }
     case ::frisquet::ReadKind::kAnnualConsumption: {
       ::frisquet::AnnualConsumption annual;
-      if (::frisquet::decode_annual_consumption(payload, length, annual)) {
+      if (::frisquet::decode_annual_consumption(frame, length, annual)) {
         this->publish_(kAnnualHotWater, annual.hot_water);
         this->publish_(kAnnualHeating, annual.heating);
       }
@@ -239,7 +348,7 @@ void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
     }
     case ::frisquet::ReadKind::kHotWaterMode: {
       ::frisquet::DecodedHotWaterMode mode;
-      if (::frisquet::decode_hot_water_mode(payload, length, mode)) {
+      if (::frisquet::decode_hot_water_mode(frame, length, mode)) {
         const char *name = "Inconnu";
         switch (mode.mode) {
           case ::frisquet::HotWaterMode::kMax: name = "Max"; break;
@@ -303,6 +412,10 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
   char raw[40];
   snprintf(raw, sizeof(raw), "état=%02X mode=%02X jour=%u", b.state_raw, b.mode_raw[0], b.weekday);
   this->publish_text_(kZone1Raw, raw);
+#ifdef FRISQUET_TX_ENABLED
+  // The broadcast date drives the radio slots, as the MQTT firmware's clock does.
+  this->engine_.clock().set_from_bcd(millis(), b.year, b.month, b.day, b.hour, b.minute, b.second);
+#endif
   this->publish_activity_();
 }
 
@@ -332,13 +445,20 @@ void FrisquetRadio::publish_activity_() {
 }
 
 void FrisquetRadio::dump_config() {
-  ESP_LOGCONFIG(TAG, "Frisquet radio (receive only):");
+  ESP_LOGCONFIG(TAG, "Frisquet radio:");
   ESP_LOGCONFIG(TAG, "  Pins: CS=%u IRQ=%u RST=%u BUSY=%u SCK=%u MISO=%u MOSI=%u", this->cs_, this->irq_, this->reset_,
                 this->busy_, this->sck_, this->miso_, this->mosi_);
   ESP_LOGCONFIG(TAG, "  Network ID: %02X:%02X:%02X:%02X", this->network_id_[0], this->network_id_[1],
                 this->network_id_[2], this->network_id_[3]);
   ESP_LOGCONFIG(TAG, "  RX bandwidth: %.1f kHz", this->rx_bandwidth_);
   if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
+#ifdef FRISQUET_TX_ENABLED
+  ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s", this->tx_level_ >= 2 ? "reads + zone acks" : "reads only",
+                this->association_, this->dry_run_ ? "DRY RUN (nothing is transmitted)" : "LIVE");
+  if (!this->dry_run_) ESP_LOGW(TAG, "  Live transmission is enabled: this device acts as the boiler's Connect.");
+#else
+  ESP_LOGCONFIG(TAG, "  Transmit: none (receive only, no transmit code compiled)");
+#endif
   ESP_LOGCONFIG(TAG, "  Frames: valid=%u repaired=%u rejected=%u", this->valid_, this->repaired_, this->rejected_);
 }
 

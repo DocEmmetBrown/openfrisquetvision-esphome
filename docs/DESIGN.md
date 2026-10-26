@@ -74,13 +74,15 @@ si elle ne permet pas la capture brute.
 
 ### 4.2 Concurrence
 
-- **Une tâche FreeRTOS** possède la radio (aucun autre code n'y touche) et exécute les transactions.
-- La boucle ESPHome envoie des **commandes** dans une file (`SetMode`, `SendZone`, `ReadMemory`, …) et reçoit des
-  **résultats/événements** via une seconde file. **Les entités ne sont modifiées que dans la boucle principale.**
-- Le **cœur** est une machine à états sans E/S : il reçoit des horodatages et des trames, et rend des actions radio.
-  Il est donc testable avec des trames enregistrées, sans matériel.
-- Réception : IRQ → tampon → décodage (CRC/réparation) dans la tâche radio ; les trames « non attendues » sont
-  mises en tampon (comme `bufferUnexpectedPacket`) pour être réutilisées.
+**Révisé le 26/10/2026 : pas de tâche FreeRTOS dédiée.** Le moteur Connect (`proto_engine.h`) est une machine à états **non bloquante** :
+il reçoit les trames et l'horloge, et rend la prochaine trame à émettre. Les seuls appels bloquants sont l'émission (≈ 25 ms par trame) ;
+les attentes de réponse (jusqu'à 22 s dans l'ancien firmware) sont des états du moteur. Tout tourne donc dans la boucle ESPHome,
+sans file ni verrou, et les entités ne sont modifiées que là. Une tâche reste possible si la latence des accusés devient un problème.
+
+- Le **cœur** est une machine à états sans E/S, testée sur hôte avec des trames réelles.
+- Réception : IRQ → drapeau → lecture de la capture brute, CRC et réparation dans `loop()`.
+- Émission : la porte `evaluate_tx()` juge chaque trame, `loop()` attend 30 ms (comme l'ancien firmware) puis émet ; l'interruption
+  « émission terminée » est ignorée pendant l'émission.
 
 ### 4.3 Ordonnanceur de créneaux
 
@@ -295,7 +297,7 @@ Conséquences :
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
-1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun** chemin d'émission (phases R à 1) ;
+1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
    `read` n'autorise que les lectures de la liste blanche ; `ack` ajoute l'accusé des relais de zone (écho exact du bloc relayé, vérifié
    octet par octet avant envoi) ; `write` est réservé (aucune écriture n'est reconnue tant que sa liste blanche n'existe pas).
    La porte `evaluate_tx()` (`proto_txgate.h`) refuse tout ce qui n'est pas reconnu : identité (émetteur, association), liste d'adresses,

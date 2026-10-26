@@ -24,6 +24,8 @@ frisquet_ns = cg.esphome_ns.namespace("frisquet_radio")
 FrisquetRadio = frisquet_ns.class_("FrisquetRadio", cg.Component)
 
 CONF_TX = "tx"
+CONF_DRY_RUN = "dry_run"
+CONF_ASSOCIATION = "association"
 CONF_NETWORK_ID = "network_id"
 CONF_BOARD = "board"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
@@ -108,6 +110,12 @@ SENSORS = {
     ),
     "annual_consumption_hot_water": _energy_total(),
     "annual_consumption_heating": _energy_total(),
+    # Transmit-side counters (stay at 0 when tx: none).
+    "acks_sent": _counter(),
+    "reads_ok": _counter(),
+    "reads_failed": _counter(),
+    "tx_dry_runs": _counter(),
+    "tx_blocked": _counter(),
 }
 
 # Same rule for the C++ TextId enum.
@@ -139,19 +147,39 @@ def network_id(value):
     return octets
 
 
-CONFIG_SCHEMA = cv.Schema(
+def _validate_tx(config):
+    if config[CONF_TX] != "none":
+        if CONF_ASSOCIATION not in config:
+            raise cv.Invalid(
+                "association (the Connect's association byte, e.g. 0xE3) is required when tx is not 'none'"
+            )
+        if config[CONF_ASSOCIATION] == 0xFF:
+            raise cv.Invalid("association 0xFF means 'not associated'")
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(FrisquetRadio),
         cv.Required(CONF_BOARD): cv.one_of(*BOARDS, lower=True),
         cv.Required(CONF_NETWORK_ID): network_id,
-        # No transmit path is compiled or reachable in this build.
-        cv.Optional(CONF_TX, default="none"): cv.one_of("none", lower=True),
+        # none: no transmit path is compiled. read: scheduled reads only. ack: reads and the
+        # acknowledgement of the boiler's zone relays (what a Connect must do).
+        cv.Optional(CONF_TX, default="none"): cv.one_of("none", "read", "ack", lower=True),
+        # While true, frames are built, checked and logged but never transmitted.
+        cv.Optional(CONF_DRY_RUN, default=True): cv.boolean,
+        cv.Optional(CONF_ASSOCIATION): cv.hex_uint8_t,
         cv.Optional(CONF_RX_BANDWIDTH, default=234.3): cv.one_of(*RX_BANDWIDTHS, float=True),
         cv.Optional(CONF_LNA_BYPASS, default=False): cv.boolean,
         **{cv.Optional(key): schema for key, schema in SENSORS.items()},
         **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
     }
-).extend(cv.COMPONENT_SCHEMA)
+    ).extend(cv.COMPONENT_SCHEMA),
+    _validate_tx,
+)
+
+
 
 
 async def to_code(config):
@@ -175,6 +203,12 @@ async def to_code(config):
     cg.add(var.set_network_id(octets[0], octets[1], octets[2], octets[3]))
     cg.add(var.set_rx_bandwidth(config[CONF_RX_BANDWIDTH]))
     cg.add(var.set_lna_bypass(config[CONF_LNA_BYPASS]))
+
+    if config[CONF_TX] != "none":
+        # The transmit path only exists in builds that ask for it.
+        cg.add_define("FRISQUET_TX_ENABLED")
+        level = {"read": 1, "ack": 2}[config[CONF_TX]]
+        cg.add(var.set_tx(level, config[CONF_DRY_RUN], config[CONF_ASSOCIATION]))
 
     for index, key in enumerate(SENSORS):
         if key in config:
