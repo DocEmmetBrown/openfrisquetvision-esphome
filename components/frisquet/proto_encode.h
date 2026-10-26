@@ -69,6 +69,37 @@ inline size_t build_zone_ack(const uint8_t *relay, size_t relay_length, uint8_t 
   return kZoneAckLength;
 }
 
+// Zone configuration block write (type 0x17): the Connect's way to change a zone's setpoints, mode and weekly
+// programme. The boiler relays it to the satellite and answers (reception 0x88 | zone) once the satellite accepted it,
+// which can take minutes: the satellite listens only around its own slot.
+//   80 <self> <assoc> <id> <zone 08..0A> 17 A1 54 00 18 A1 54 00 18 30 <48-byte block>
+constexpr size_t kZoneBlockSize = 48;
+constexpr size_t kZoneWriteLength = 63;
+
+// Setpoints are tenths of a degree above 5 degrees, in steps of 0.5: 19.0 -> 0x8C.
+inline uint8_t encode_temperature8(float celsius) {
+  if (celsius < 5.0f) celsius = 5.0f;
+  if (celsius > 30.0f) celsius = 30.0f;
+  return static_cast<uint8_t>((roundf(celsius * 2.0f) / 2.0f - 5.0f) * 10.0f + 0.5f);
+}
+
+inline size_t build_zone_write(uint8_t *out, size_t capacity, uint8_t requester, uint8_t association,
+                               uint8_t message_id, uint8_t zone_id, const uint8_t *block) {
+  if (!out || !block || capacity < kZoneWriteLength || zone_id < kIdZone1 || zone_id > kIdZone3) return 0;
+  Header h;
+  h.destination = kIdBoiler;
+  h.source = requester;
+  h.association = association;
+  h.message_id = message_id;
+  h.reception = zone_id;
+  h.type = kInit;
+  write_header(out, h);
+  static const uint8_t kBody[9] = {0xA1, 0x54, 0x00, 0x18, 0xA1, 0x54, 0x00, 0x18, 0x30};
+  memcpy(out + 6, kBody, sizeof(kBody));
+  memcpy(out + 15, block, kZoneBlockSize);
+  return kZoneWriteLength;
+}
+
 // 0xA0FC hot-water mode write (type 0x17, direct message): read and write of the same word, 2 data bytes.
 //   80 <self> <assoc> <id> 01 17 A0 FC 00 01 A0 FC 00 01 02 00 <mode byte>
 // The mode byte is the mode (bits 0x7E) plus the frame bits (0x81) last read from the boiler.

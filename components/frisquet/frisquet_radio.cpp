@@ -113,22 +113,56 @@ void FrisquetRadio::republish_hot_water_mode() {
 }
 
 #ifdef FRISQUET_TX_ENABLED
+static const char *write_state_name(::frisquet::WriteState state) {
+  switch (state) {
+    case ::frisquet::WriteState::kQueued: return "queued";
+    case ::frisquet::WriteState::kSending: return "sending";
+    case ::frisquet::WriteState::kAcked: return "acked";
+    case ::frisquet::WriteState::kVerified: return "verified";
+    case ::frisquet::WriteState::kFailed: return "failed";
+    case ::frisquet::WriteState::kNotSent: return "not-sent";
+    default: return "idle";
+  }
+}
+
+bool FrisquetRadio::request_zone_setpoint(uint8_t field, float celsius) {
+  if (field > 2 || !this->engine_.zone_block_known(0)) return false;
+  uint8_t raw[3];
+  memcpy(raw, this->engine_.zone_block(0), 3);
+  raw[field] = ::frisquet::encode_temperature8(celsius);
+  if (raw[2] > raw[1] || raw[1] > raw[0]) return false;  // frost <= reduced <= comfort
+  return this->engine_.request_zone_setpoints(0, raw[0], raw[1], raw[2]);
+}
+
+void FrisquetRadio::republish_zone_setpoints() {
+  for (int &raw : this->last_zone_raw_) raw = -1;
+}
+
+void FrisquetRadio::sync_zone_() {
+  const ::frisquet::WriteState state = this->engine_.zone_write_state();
+  if (state != this->last_zone_state_) {
+    this->last_zone_state_ = state;
+    ESP_LOGI(TAG, "Zone block write: %s", write_state_name(state));
+    this->publish_text_(kZoneWrite, write_state_name(state));
+  }
+  if (!this->engine_.zone_block_known(0)) return;
+  const uint8_t *block = this->engine_.zone_block(0);
+  for (uint8_t field = 0; field < 3; ++field) {
+    if (block[field] == this->last_zone_raw_[field]) continue;
+    this->last_zone_raw_[field] = block[field];
+#ifdef USE_NUMBER
+    if (this->zone_numbers_[field] != nullptr)
+      this->zone_numbers_[field]->publish_state(::frisquet::temperature8(block[field]));
+#endif
+  }
+}
+
 void FrisquetRadio::sync_hot_water_() {
   const ::frisquet::WriteState state = this->engine_.write_state();
   if (state != this->last_write_state_) {
     this->last_write_state_ = state;
-    const char *name = "idle";
-    switch (state) {
-      case ::frisquet::WriteState::kQueued: name = "queued"; break;
-      case ::frisquet::WriteState::kSending: name = "sending"; break;
-      case ::frisquet::WriteState::kAcked: name = "acked"; break;
-      case ::frisquet::WriteState::kVerified: name = "verified"; break;
-      case ::frisquet::WriteState::kFailed: name = "failed"; break;
-      case ::frisquet::WriteState::kNotSent: name = "not-sent"; break;
-      default: break;
-    }
-    ESP_LOGI(TAG, "Hot-water mode write: %s", name);
-    this->publish_text_(kHotWaterWrite, name);
+    ESP_LOGI(TAG, "Hot-water mode write: %s", write_state_name(state));
+    this->publish_text_(kHotWaterWrite, write_state_name(state));
   }
   if (this->engine_.hot_water_mode_known()) {
     const int mode = static_cast<int>(this->engine_.hot_water_mode());
@@ -147,6 +181,9 @@ void FrisquetRadio::sync_hot_water_() {
     }
   }
 }
+#else
+bool FrisquetRadio::request_zone_setpoint(uint8_t, float) { return false; }
+void FrisquetRadio::republish_zone_setpoints() {}
 #endif
 
 void FrisquetRadio::setup() {
@@ -206,6 +243,7 @@ void FrisquetRadio::setup() {
   policy.kill_switch = this->killed_;
   policy.self_id = ::frisquet::kIdConnect;
   policy.association = this->association_;
+  if (this->tx_level_ >= 3) policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints;
   this->engine_.set_policy(policy);
   this->engine_.set_next_message_id(static_cast<uint8_t>(random_uint32() & 0xFF));
   this->engine_.request_initial_reads();
@@ -250,12 +288,14 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
     case ::frisquet::TxClass::kReadRequest: return "read";
     case ::frisquet::TxClass::kZoneAck: return "zone-ack";
     case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
+    case ::frisquet::TxClass::kZoneWrite: return "zone-write";
     default: return "?";
   }
 }
 
 void FrisquetRadio::tx_step_(uint32_t now) {
   this->sync_hot_water_();
+  this->sync_zone_();
   if (this->pending_tx_valid_) {
     if (static_cast<int32_t>(now - this->pending_tx_due_ms_) >= 0) this->transmit_pending_();
     return;
@@ -528,7 +568,7 @@ void FrisquetRadio::dump_config() {
   if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
 #ifdef FRISQUET_TX_ENABLED
   ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s",
-                this->tx_level_ >= 3 ? "reads + zone acks + hot-water mode writes"
+                this->tx_level_ >= 3 ? "reads + zone acks + hot-water mode and zone 1 setpoint writes"
                 : this->tx_level_ >= 2 ? "reads + zone acks"
                                        : "reads only",
                 this->association_, this->dry_run_ ? "DRY RUN (nothing is transmitted)" : "LIVE");

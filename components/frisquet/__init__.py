@@ -130,6 +130,8 @@ TEXT_SENSORS = {
     "zone_block": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     # State of the last hot-water mode write: queued, sending, acked, verified, failed, not-sent.
     "hot_water_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # Same states for the last zone 1 setpoint write.
+    "zone_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 

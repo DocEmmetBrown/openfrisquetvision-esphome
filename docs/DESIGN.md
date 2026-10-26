@@ -348,11 +348,24 @@ Première **écriture** émise par le firmware ESPHome, depuis le sélecteur « 
 - 9 lectures réussies, 0 échec, 0 trame bloquée, aucun avertissement hormis celui de la transmission réelle.
 - La seconde écriture est antérieure au début de la capture des journaux : elle est établie par l'état final (sélecteur, relecture, tableau de bord MQTT).
 
+### 10.8 Écriture des consignes de zone (construite et testée sur l'hôte, pas encore émise)
+
+- Constructeur `build_zone_write` identique octet pour octet à la trame réelle du 25/10 (fixture `payload_zone_write`) ; la réponse réelle
+  (`payload_zone_write_reply`) est reconnue par le moteur, y compris sous l'id d'une rafale précédente.
+- Porte : trame de 63 octets, en-tête exact `A1 54 00 18 A1 54 00 18 30`, consignes 5,0–30,0 °C par pas de 0,5, hors-gel ≤ réduit ≤ confort,
+  mode 05–08, et **tous les octets hors du masque `zone_write_mask` identiques au dernier bloc relayé** (masque = consignes seulement tant
+  que le mode et le programme ne sont pas validés). Sans bloc connu : aucune émission.
+- Moteur : une rafale de 5 émissions, nouvelle rafale (nouvel id) 30 s après la précédente tant que la chaudière n'a pas répondu, abandon
+  après 20 minutes (état `failed`) ; hors fenêtre silencieuse seulement ; les lectures planifiées s'intercalent entre les rafales.
+  Un relais reçu pendant l'écriture ne remplace pas le bloc connu ; une fois l'écho reçu, l'état est `verified` et le bloc connu est mis à jour.
+- Entités : trois `number` (confort, réduit, hors-gel de la zone 1) et le texte d'état `zone_write`.
+- Pas encore fait : persistance du bloc (il faut attendre un relais après le démarrage), écriture du mode et du programme, zones 2 et 3.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
    `read` n'autorise que les lectures de la liste blanche ; `ack` ajoute l'accusé des relais de zone (écho exact du bloc relayé, vérifié
-   octet par octet avant envoi) ; `write` est réservé (aucune écriture n'est reconnue tant que sa liste blanche n'existe pas).
+   octet par octet avant envoi) ; `write` est réservé aux écritures de la liste blanche (mode ECS ; bloc de zone limité aux champs du masque).
    La porte `evaluate_tx()` (`proto_txgate.h`) refuse tout ce qui n'est pas reconnu : identité (émetteur, association), liste d'adresses,
    taille, interrupteur d'arrêt, niveau, dry-run.
 2. **Liste blanche** d'adresses par palier (2a : lectures ; 2b : `A0FC` ; 2c : bloc de zone).

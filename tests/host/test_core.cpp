@@ -308,7 +308,7 @@ static void test_tx_gate() {
   zone_write[0] = kIdBoiler;
   zone_write[1] = kIdConnect;
   zone_write[4] = 0x08;  // a write, not an acknowledgement
-  CHECK(evaluate_tx(p, zone_write.data(), zone_write.size()) == TxVerdict::kMalformed);  // zone writes: not recognised
+  CHECK(evaluate_tx(p, zone_write.data(), zone_write.size()) == TxVerdict::kBlockedAddress);  // relay header, not a write
   CHECK(evaluate_tx(p, req.data(), 9) == TxVerdict::kMalformed);
   CHECK(evaluate_tx(p, nullptr, 0) == TxVerdict::kMalformed);
 }
@@ -788,6 +788,192 @@ static void test_engine_hot_water_write() {
   CHECK(q.poll(now + 120000, tx) && tx.kind == TxClass::kHotWaterWrite);
 }
 
+static void test_zone_write() {
+  using namespace frisquet;
+  uint8_t out[80];
+
+  // Builder: byte for byte the write the Connect sent on 2026-10-25 17:56:04.
+  const Bytes &real = F["payload_zone_write"];
+  const Bytes &echo = F["payload_zone_write_reply"];
+  CHECK(real.size() == kZoneWriteLength && echo.size() == kZoneAckLength);
+  const size_t n = build_zone_write(out, sizeof(out), kIdConnect, 0xE3, 0x80, kIdZone1, real.data() + 15);
+  CHECK(n == real.size() && memcmp(out, real.data(), n) == 0);
+  CHECK(build_zone_write(out, 62, kIdConnect, 0xE3, 0x80, kIdZone1, real.data() + 15) == 0);
+  CHECK(build_zone_write(out, sizeof(out), kIdConnect, 0xE3, 0x80, 0x07, real.data() + 15) == 0);
+  CHECK(encode_temperature8(19.0f) == 0x8C && encode_temperature8(17.0f) == 0x78);
+  CHECK(encode_temperature8(8.0f) == 0x1E && encode_temperature8(20.0f) == 0x96);
+
+  // Gate. The reference is the block the boiler relayed last (comfort 19.0); the write moves it to 20.0.
+  const Bytes &known = F["payload_zone_relay_live"];
+  Bytes reference(known.begin() + 15, known.begin() + 15 + kZoneBlockSize);
+  Bytes block = reference;
+  block[0] = 0x96;
+  TxPolicy p = engine_policy(TxLevel::kWrite, false);
+  p.zone_write_mask = kZoneFieldSetpoints;
+  auto frame_of = [&](const Bytes &b) {
+    Bytes f(kZoneWriteLength);
+    CHECK(build_zone_write(f.data(), f.size(), kIdConnect, 0xE3, 0x90, kIdZone1, b.data()) == kZoneWriteLength);
+    return f;
+  };
+  TxClass cls = TxClass::kUnknown;
+  Bytes f = frame_of(block);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, &cls, reference.data()) == TxVerdict::kSend);
+  CHECK(cls == TxClass::kZoneWrite);
+  CHECK(evaluate_tx(p, f.data(), f.size()) == TxVerdict::kBlockedAddress);  // no known block: nothing is sent
+  TxPolicy none = p;
+  none.zone_write_mask = 0;
+  CHECK(evaluate_tx(none, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  TxPolicy ack_only = p;
+  ack_only.level = TxLevel::kAck;
+  CHECK(evaluate_tx(ack_only, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedLevel);
+  TxPolicy dry = p;
+  dry.dry_run = true;
+  CHECK(evaluate_tx(dry, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kDryRun);
+  TxPolicy killed = p;
+  killed.kill_switch = true;
+  CHECK(evaluate_tx(killed, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedKillSwitch);
+
+  // Only the allowed fields may differ from the known block.
+  Bytes other = block;
+  other[3] = 0x07;  // mode changed, but only setpoints are allowed
+  f = frame_of(other);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  TxPolicy with_mode = p;
+  with_mode.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode;
+  CHECK(evaluate_tx(with_mode, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kSend);
+  other = block;
+  other[10] ^= 0x01;  // programme changed
+  f = frame_of(other);
+  CHECK(evaluate_tx(with_mode, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  TxPolicy with_program = p;
+  with_program.zone_write_mask = kZoneFieldProgram | kZoneFieldSetpoints;
+  CHECK(evaluate_tx(with_program, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kSend);
+  other = block;
+  other[5] ^= 0x01;  // options byte: never allowed through a mask that excludes mode
+  f = frame_of(other);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+
+  // Plausible setpoints only: ordered, in 0.5 degree steps, within the raw range.
+  other = block;
+  other[1] = 0x9B;  // reduced above comfort
+  f = frame_of(other);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  other = block;
+  other[0] = 0x97;  // not a multiple of 5
+  f = frame_of(other);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  other = block;
+  other[0] = 0xFF;
+  f = frame_of(other);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  other = block;
+  other[2] = 0x7D;  // frost above reduced
+  f = frame_of(other);
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  f = frame_of(block);
+  f[9] = 0x15;  // header differs from the known write header
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
+  f = frame_of(block);
+  f[4] = 0x0B;  // not a zone
+  CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kMalformed);
+
+  // Engine: the block is learned from a relay, then written in bursts until the boiler echoes it.
+  ReadResult result;
+  TxRequest tx;
+  ConnectEngine e;
+  e.set_policy(p);
+  e.set_next_message_id(0x80);
+  e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x54, 0x30);  // 4:30 into the cycle: no slot, not quiet
+  CHECK(!e.zone_block_known(0) && !e.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+  e.on_frame(100, known.data(), known.size(), result);
+  CHECK(e.poll(110, tx) && tx.kind == TxClass::kZoneAck);
+  CHECK(e.zone_block_known(0) && memcmp(e.zone_block(0), reference.data(), kZoneBlockSize) == 0);
+  CHECK(!e.request_zone_setpoints(3, 0x96, 0x78, 0x1E) && !e.request_zone_setpoints(1, 0x96, 0x78, 0x1E));
+  CHECK(e.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+  CHECK(e.zone_write_state() == WriteState::kQueued && e.zone_write_pending());
+  CHECK(!e.request_zone_setpoints(0, 0x8C, 0x78, 0x1E));  // one write at a time
+
+  uint32_t now = 1000;
+  int sends = 0;
+  uint8_t first_id = 0;
+  for (; now < 12000; now += 100) {
+    if (e.poll(now, tx) && tx.kind == TxClass::kZoneWrite) {
+      CHECK(tx.verdict == TxVerdict::kSend && tx.length == kZoneWriteLength);
+      if (sends++ == 0) first_id = tx.frame[3];
+      CHECK(tx.frame[3] == first_id && tx.frame[4] == kIdZone1);
+      CHECK(memcmp(tx.frame + 15, block.data(), kZoneBlockSize) == 0);
+    }
+  }
+  CHECK(sends == 5);  // one burst: five sends under one id
+  CHECK(first_id == 0x80 && e.zone_write_state() == WriteState::kSending);
+  // A relay of the old block while the write is pending does not replace the known block.
+  e.on_frame(12000, known.data(), known.size(), result);
+  CHECK(memcmp(e.zone_block(0), reference.data(), kZoneBlockSize) == 0);
+  CHECK(e.poll(12010, tx) && tx.kind == TxClass::kZoneAck);
+
+  // The next burst starts about 30 s after the last, under the next id.
+  int second = 0;
+  uint8_t second_id = 0;
+  for (; now < 60000; now += 100) {
+    if (e.poll(now, tx) && tx.kind == TxClass::kZoneWrite) {
+      if (second++ == 0) second_id = tx.frame[3];
+    }
+  }
+  CHECK(second == 5 && second_id == 0x81);
+  CHECK(e.stats().zone_bursts == 2);
+
+  // The boiler answers a send of the first burst (as seen on the air): the write is done, the block known.
+  Bytes reply(kZoneAckLength);
+  memcpy(reply.data(), echo.data(), 7);
+  reply[3] = 0x80;
+  memcpy(reply.data() + 7, block.data(), kZoneBlockSize);
+  Bytes wrong_block = reply;
+  wrong_block[7] ^= 0x01;
+  e.on_frame(now, wrong_block.data(), wrong_block.size(), result);
+  CHECK(e.zone_write_state() == WriteState::kSending);
+  Bytes wrong_id = reply;
+  wrong_id[3] = 0x7F;  // before this write began
+  e.on_frame(now, wrong_id.data(), wrong_id.size(), result);
+  CHECK(e.zone_write_state() == WriteState::kSending);
+  e.on_frame(now, reply.data(), reply.size(), result);
+  CHECK(e.zone_write_state() == WriteState::kVerified && e.stats().zone_writes_acked == 1);
+  CHECK(memcmp(e.zone_block(0), block.data(), kZoneBlockSize) == 0);
+  const uint32_t bursts = e.stats().zone_bursts;
+  for (uint32_t t = now; t < now + 120000; t += 100) e.poll(t, tx);
+  CHECK(e.stats().zone_bursts == bursts);  // no more sends once echoed
+  CHECK(e.request_zone_setpoints(0, 0x8C, 0x78, 0x1E));  // a new write is possible
+
+  // Never echoed: bursts continue until the deadline, then failed (and the block stays as it was).
+  ConnectEngine g;
+  g.set_policy(p);
+  g.set_next_message_id(0x80);
+  g.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x54, 0x30);
+  g.on_frame(100, known.data(), known.size(), result);
+  CHECK(g.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+  for (uint32_t t = 1000; t < 22UL * 60UL * 1000UL; t += 100) {
+    if (g.poll(t, tx) && tx.kind == TxClass::kZoneAck) continue;
+  }
+  CHECK(g.zone_write_state() == WriteState::kFailed && g.stats().zone_writes_failed == 1);
+  CHECK(g.stats().zone_bursts >= 20);
+  CHECK(memcmp(g.zone_block(0), reference.data(), kZoneBlockSize) == 0);
+
+  // Below the write level or in dry run: judged, never sent.
+  ConnectEngine low;
+  low.set_policy(ack_only);
+  low.set_next_message_id(0x80);
+  low.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x54, 0x30);
+  low.on_frame(100, known.data(), known.size(), result);
+  CHECK(low.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+  bool judged = false;
+  for (uint32_t t = 1000; t < 5000 && !judged; t += 100) {
+    if (low.poll(t, tx) && tx.kind == TxClass::kZoneWrite) {
+      CHECK(tx.verdict == TxVerdict::kBlockedLevel);
+      judged = true;
+    }
+  }
+  CHECK(judged && low.zone_write_state() == WriteState::kNotSent && !low.reading());
+}
+
 static void test_zone_mode() {
   // 0x20 is Auto, reduced (verified: the satellite stayed in Auto while the programme went reduced).
   const Bytes &reduced = F["payload_sat_broadcast_reduced"];
@@ -1030,6 +1216,7 @@ int main() {
   test_engine_schedule_and_failure();
   test_hot_water_write_frame_and_gate();
   test_engine_hot_water_write();
+  test_zone_write();
   test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();

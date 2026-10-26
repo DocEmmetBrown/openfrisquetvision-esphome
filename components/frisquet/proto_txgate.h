@@ -25,7 +25,12 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite };
+
+// Which parts of a zone block a write may change; everything else must equal the last known block.
+constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
+constexpr uint8_t kZoneFieldMode = 0x02;       // mode and options
+constexpr uint8_t kZoneFieldProgram = 0x04;    // the 42-byte weekly programme
 
 struct TxPolicy {
   TxLevel level = TxLevel::kNone;
@@ -33,6 +38,7 @@ struct TxPolicy {
   bool kill_switch = false; // forces listen-only
   uint8_t self_id = kIdConnect;
   uint8_t association = 0xFF;  // 0xFF = not associated: nothing may be sent
+  uint8_t zone_write_mask = 0; // kZoneField* bits a zone write may change (0: zone writes refused)
 };
 
 constexpr uint16_t kMaxReadWords = 0x40;
@@ -54,7 +60,7 @@ inline const char *verdict_name(TxVerdict v) {
 // acknowledgement must be exactly what build_zone_ack() derives from it.
 inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_t length,
                              const uint8_t *relay = nullptr, size_t relay_length = 0,
-                             TxClass *classified = nullptr) {
+                             TxClass *classified = nullptr, const uint8_t *zone_reference = nullptr) {
   TxClass cls = TxClass::kUnknown;
   if (classified) *classified = cls;
   if (policy.kill_switch) return TxVerdict::kBlockedKillSwitch;
@@ -67,6 +73,9 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   } else if (header.type == kInit && header.is_ack()) {
     if (length != kZoneAckLength || frame[6] != 0x30) return TxVerdict::kMalformed;
     cls = TxClass::kZoneAck;
+  } else if (header.type == kInit && length == kZoneWriteLength) {
+    if (header.reception < kIdZone1 || header.reception > kIdZone3) return TxVerdict::kMalformed;
+    cls = TxClass::kZoneWrite;
   } else if (header.type == kInit) {
     if (length != kHotWaterModeWriteLength || header.reception != 0x01) return TxVerdict::kMalformed;
     cls = TxClass::kHotWaterWrite;
@@ -84,6 +93,26 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     if (classify_read_address(address) == ReadKind::kUnknown || words == 0 || words > kMaxReadWords)
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kRead) return TxVerdict::kBlockedLevel;
+  } else if (cls == TxClass::kZoneWrite) {
+    static const uint8_t kBody[9] = {0xA1, 0x54, 0x00, 0x18, 0xA1, 0x54, 0x00, 0x18, 0x30};
+    if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0) return TxVerdict::kBlockedAddress;
+    const uint8_t *data = frame + 15;
+    // Setpoints are 0.5 degree steps in 5.0..30.0: raw 0..250, multiples of 5, frost <= reduced <= comfort.
+    for (int i = 0; i < 3; ++i)
+      if (data[i] > 250 || data[i] % 5 != 0) return TxVerdict::kBlockedAddress;
+    if (data[2] > data[1] || data[1] > data[0]) return TxVerdict::kBlockedAddress;
+    // Mode byte: auto, comfort, reduced or frost only.
+    if (data[3] < 0x05 || data[3] > 0x08) return TxVerdict::kBlockedAddress;
+    // A write must start from the last known block: without it nothing is sent, and only the
+    // fields the policy allows may differ from it.
+    if (!zone_reference || policy.zone_write_mask == 0) return TxVerdict::kBlockedAddress;
+    if (!(policy.zone_write_mask & kZoneFieldSetpoints) && memcmp(data, zone_reference, 3) != 0)
+      return TxVerdict::kBlockedAddress;
+    if (!(policy.zone_write_mask & kZoneFieldMode) && memcmp(data + 3, zone_reference + 3, 3) != 0)
+      return TxVerdict::kBlockedAddress;
+    if (!(policy.zone_write_mask & kZoneFieldProgram) && memcmp(data + 6, zone_reference + 6, 42) != 0)
+      return TxVerdict::kBlockedAddress;
+    if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
   } else if (cls == TxClass::kHotWaterWrite) {
     // Exactly the write the MQTT firmware sends, with a known hot-water mode: nothing else.
     static const uint8_t kBody[10] = {0xA0, 0xFC, 0x00, 0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00};

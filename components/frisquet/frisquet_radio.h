@@ -11,6 +11,9 @@
 #ifdef USE_SELECT
 #include "esphome/components/select/select.h"
 #endif
+#ifdef USE_NUMBER
+#include "esphome/components/number/number.h"
+#endif
 
 #include "proto_crc.h"
 #include "proto_decode.h"
@@ -73,6 +76,7 @@ enum TextId : uint8_t {
   kZone1Raw,
   kZoneBlock,
   kHotWaterWrite,
+  kZoneWrite,
   kTextCount,
 };
 
@@ -108,6 +112,15 @@ class FrisquetRadio : public Component {
   void set_hot_water_select(select::Select *s) { hot_water_select_ = s; }
 #endif
 
+  // Zone 1 setpoints: field 0 comfort, 1 reduced, 2 frost. False when the change cannot be queued.
+  bool request_zone_setpoint(uint8_t field, float celsius);
+  void republish_zone_setpoints();
+#ifdef USE_NUMBER
+  void set_zone_number(uint8_t field, number::Number *n) {
+    if (field < 3) zone_numbers_[field] = n;
+  }
+#endif
+
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -128,6 +141,7 @@ class FrisquetRadio : public Component {
   void tx_step_(uint32_t now);
   void transmit_pending_();
   void sync_hot_water_();
+  void sync_zone_();
 #endif
 
   uint8_t cs_{8}, irq_{14}, reset_{12}, busy_{13}, sck_{9}, miso_{11}, mosi_{10};
@@ -162,6 +176,11 @@ class FrisquetRadio : public Component {
   uint32_t tx_errors_{0};
   ::frisquet::WriteState last_write_state_{::frisquet::WriteState::kIdle};
   int last_published_mode_{-1};
+  ::frisquet::WriteState last_zone_state_{::frisquet::WriteState::kIdle};
+  int last_zone_raw_[3]{-1, -1, -1};
+#endif
+#ifdef USE_NUMBER
+  number::Number *zone_numbers_[3]{};
 #endif
 #ifdef USE_SELECT
   select::Select *hot_water_select_{nullptr};

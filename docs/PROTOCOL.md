@@ -100,6 +100,19 @@ actuelle (`0x90` = `0x80` + Eco Horaires sur cette installation). La chaudière 
 (`7E 80 E3 1C 81 17 02 00 88`, 9 octets : réception `0x81`, type `0x17`, et la **nouvelle valeur** `00 88` relue).
 L'ancien firmware ne relit pas la valeur ; le nouveau la relit (`A0FC`) et ne déclare l'écriture réussie que si elle correspond.
 
+## Écriture d'un bloc de zone (type 0x17, 63 octets) *(capturée le 25/10/2026 17:56 – 17:59)*
+
+`80 <connect> <assoc> <id> <zone 08..0A> 17 A1 54 00 18 A1 54 00 18 30 <bloc de 48 octets>` (63 octets). La chaudière le relaie au satellite
+(`08 80 FA <id> 7E 17 …`) et **n'y répond qu'une fois le satellite arrivé à le recevoir** : le satellite n'écoute qu'autour de son créneau
+(`:x7:02` sur cette installation), l'acceptation peut donc prendre plusieurs minutes (~10 min observées).
+
+- Le Connect émet des **rafales** de 5 trames espacées de 2 s sous un même id, puis la rafale suivante sous l'id suivant après ~30 s,
+  jusqu'à la réponse.
+- Réponse de la chaudière : `7E 80 E3 <id> 88 17 30 <bloc>` (55 octets), un écho du bloc, vue environ 1 s après la dernière émission reçue
+  par le satellite. L'id peut être celui d'une **rafale précédente** (vu : réponse sous `0x83` alors que les rafales en étaient à `0x8A`).
+- Le bloc **ne peut pas être lu** (`A154` renvoie une erreur de type `0x83`) : le Connect le connaît par les relais de la chaudière
+  (et sa persistance). Une écriture part toujours du dernier bloc connu, où seuls les champs voulus changent.
+
 ## Créneaux (cycle de 10 minutes)
 
 | Instant | Émetteur | Action |

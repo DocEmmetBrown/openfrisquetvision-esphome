@@ -24,6 +24,9 @@ struct EngineStats {
   uint32_t writes_acked = 0;
   uint32_t writes_verified = 0;
   uint32_t writes_failed = 0;
+  uint32_t zone_bursts = 0;
+  uint32_t zone_writes_acked = 0;
+  uint32_t zone_writes_failed = 0;
 };
 
 // Life of a hot-water mode write: queued, sent until the boiler acknowledges, then read back.
@@ -76,12 +79,55 @@ class ConnectEngine {
   HotWaterMode hot_water_mode() const { return hot_water_mode_; }
   bool hot_water_mode_known() const { return hot_water_known_; }
 
+  // Zone blocks: learned from the relays the boiler sends us (the block cannot be read back).
+  bool zone_block_known(uint8_t zone_index) const { return zone_index < 3 && zone_known_[zone_index]; }
+  const uint8_t *zone_block(uint8_t zone_index) const { return zone_index < 3 ? zone_block_[zone_index] : nullptr; }
+  WriteState zone_write_state() const { return zone_state_; }
+  uint8_t zone_write_zone() const { return zone_index_; }
+  bool zone_write_pending() const { return zone_state_ == WriteState::kQueued || zone_state_ == WriteState::kSending; }
+
+  // Ask for a new block for a zone. Refused while a zone write is pending and until the zone's current block
+  // is known: every byte not meant to change is copied from it. The gate decides what may really change.
+  bool request_zone_block(uint8_t zone_index, const uint8_t *block) {
+    if (zone_index >= 3 || !zone_known_[zone_index] || zone_write_pending() || !block) return false;
+    memcpy(zone_request_, block, kZoneBlockSize);
+    zone_index_ = zone_index;
+    zone_state_ = WriteState::kQueued;
+    return true;
+  }
+  bool request_zone_setpoints(uint8_t zone_index, uint8_t comfort_raw, uint8_t reduced_raw, uint8_t frost_raw) {
+    if (zone_index >= 3 || !zone_known_[zone_index]) return false;
+    uint8_t block[kZoneBlockSize];
+    memcpy(block, zone_block_[zone_index], kZoneBlockSize);
+    block[0] = comfort_raw;
+    block[1] = reduced_raw;
+    block[2] = frost_raw;
+    return request_zone_block(zone_index, block);
+  }
+
   // Every validated frame. Returns true when it completes the running read.
   bool on_frame(uint32_t now_ms, const uint8_t *payload, size_t length, ReadResult &result) {
     if (is_zone_relay(payload, length, policy_.self_id) && length <= sizeof(relay_)) {
       memcpy(relay_, payload, length);
       relay_length_ = length;
       ack_pending_ = true;
+      // A pending write owns the block: what the boiler relays meanwhile is the old one.
+      const uint8_t index = payload[4] - kIdZone1;
+      if (!zone_write_pending() && index < 3) {
+        memcpy(zone_block_[index], payload + 15, kZoneBlockSize);
+        zone_known_[index] = true;
+      }
+    }
+    if (zone_write_pending() && is_zone_write_reply_(payload, length)) {
+      memcpy(zone_block_[zone_index_], zone_request_, kZoneBlockSize);
+      zone_known_[zone_index_] = true;
+      zone_state_ = WriteState::kVerified;
+      ++stats_.zone_writes_acked;
+      if (zone_writing_) {
+        zone_writing_ = false;
+        transaction_.abort();
+      }
+      return false;
     }
     if (transaction_.active() && transaction_.on_frame(payload, length)) {
       next_id_ = transaction_.next_message_id();
@@ -142,6 +188,14 @@ class ConnectEngine {
     size_t length = 0;
     const ReadTransaction::Action action = transaction_.poll(now_ms, tx.frame, sizeof(tx.frame), length);
     if (action == ReadTransaction::Action::kFailed) {
+      if (zone_writing_) {
+        // An unanswered burst is not a failure: the satellite may not have been listening. Try again later.
+        zone_writing_ = false;
+        zone_next_burst_ms_ = now_ms + kZoneBurstGapMs;
+        next_id_ = transaction_.next_message_id();
+        transaction_.abort();
+        return false;
+      }
       if (writing_) {
         writing_ = false;
         write_state_ = WriteState::kFailed;
@@ -160,7 +214,8 @@ class ConnectEngine {
     }
     if (action != ReadTransaction::Action::kSend) return false;
     tx.length = length;
-    tx.verdict = evaluate_tx(policy_, tx.frame, tx.length, nullptr, 0, &tx.kind);
+    tx.verdict = evaluate_tx(policy_, tx.frame, tx.length, nullptr, 0, &tx.kind,
+                             zone_writing_ && zone_known_[zone_index_] ? zone_block_[zone_index_] : nullptr);
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
@@ -168,12 +223,20 @@ class ConnectEngine {
         writing_ = false;
         write_state_ = WriteState::kNotSent;
       }
+      if (zone_writing_) {
+        zone_writing_ = false;
+        zone_state_ = WriteState::kNotSent;
+      }
       transaction_.abort();
     } else if (tx.verdict != TxVerdict::kSend) {
       ++stats_.blocked;
       if (writing_) {
         writing_ = false;
         write_state_ = WriteState::kNotSent;
+      }
+      if (zone_writing_) {
+        zone_writing_ = false;
+        zone_state_ = WriteState::kNotSent;
       }
       transaction_.abort();
     }
@@ -225,6 +288,10 @@ class ConnectEngine {
   }
 
   bool start_next_(uint32_t now_ms) {
+    if (zone_state_ == WriteState::kSending && !zone_writing_ && now_ms - zone_start_ms_ > kZoneWriteDeadlineMs) {
+      zone_state_ = WriteState::kFailed;
+      ++stats_.zone_writes_failed;
+    }
     // Reads and writes wait for the end of the satellites' window; acknowledgements never do.
     if (in_quiet_window(clock_.seconds(now_ms))) return false;
     // A requested hot-water change goes before any queued read.
@@ -233,6 +300,19 @@ class ConnectEngine {
                                          hot_water_frame_bits_);
       writing_ = true;
       write_state_ = WriteState::kSending;
+      return true;
+    }
+    // Then a zone write: one burst every kZoneBurstGapMs, each under a new id, until the boiler answers.
+    if (zone_state_ == WriteState::kQueued || (zone_state_ == WriteState::kSending && now_ms >= zone_next_burst_ms_)) {
+      if (zone_state_ == WriteState::kQueued) {
+        zone_start_ms_ = now_ms;
+        zone_first_id_ = next_id_;
+        zone_state_ = WriteState::kSending;
+      }
+      transaction_.start_zone_write(policy_.self_id, policy_.association, next_id_,
+                                    static_cast<uint8_t>(kIdZone1 + zone_index_), zone_request_);
+      zone_writing_ = true;
+      ++stats_.zone_bursts;
       return true;
     }
     if (queue_length_ == 0) return false;
@@ -253,6 +333,22 @@ class ConnectEngine {
     return true;
   }
 
+  // Boiler echo of the block we wrote: 80->self, reception = zone | 0x80, 0x30, the 48 bytes, under one of the
+  // ids used since the write began.
+  bool is_zone_write_reply_(const uint8_t *frame, size_t length) const {
+    Header h;
+    if (length != kZoneAckLength || !parse_header(frame, length, h)) return false;
+    if (h.type != kInit || h.source != kIdBoiler || h.destination != policy_.self_id ||
+        h.association != policy_.association || h.reception != ((kIdZone1 + zone_index_) | 0x80) || frame[6] != 0x30)
+      return false;
+    const uint8_t last = zone_writing_ ? next_id_ : static_cast<uint8_t>(next_id_ - 1);
+    if (static_cast<uint8_t>(last - h.message_id) > static_cast<uint8_t>(last - zone_first_id_)) return false;
+    return memcmp(frame + 7, zone_request_, kZoneBlockSize) == 0;
+  }
+
+  static constexpr uint32_t kZoneBurstGapMs = 30000;
+  static constexpr uint32_t kZoneWriteDeadlineMs = 20UL * 60UL * 1000UL;
+
   TxPolicy policy_;
   BoilerClock clock_;
   bool clock_was_known_ = false;
@@ -272,6 +368,15 @@ class ConnectEngine {
   uint8_t hot_water_frame_bits_ = 0;
   bool hot_water_known_ = false;
   bool ack_pending_ = false;
+  uint8_t zone_block_[3][kZoneBlockSize] = {};
+  bool zone_known_[3] = {};
+  uint8_t zone_request_[kZoneBlockSize] = {};
+  uint8_t zone_index_ = 0;
+  uint8_t zone_first_id_ = 0;
+  bool zone_writing_ = false;
+  WriteState zone_state_ = WriteState::kIdle;
+  uint32_t zone_start_ms_ = 0;
+  uint32_t zone_next_burst_ms_ = 0;
   uint8_t relay_[64] = {};
   size_t relay_length_ = 0;
 };

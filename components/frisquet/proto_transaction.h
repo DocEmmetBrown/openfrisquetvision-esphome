@@ -21,6 +21,7 @@ class ReadTransaction {
   void start(uint8_t self_id, uint8_t association, uint8_t first_message_id, uint16_t address,
              uint16_t size_words) {
     kind_ = Kind::kRead;
+    attempts_ = kAttempts;
     self_id_ = self_id;
     association_ = association;
     message_id_ = first_message_id;
@@ -31,6 +32,17 @@ class ReadTransaction {
     last_send_ms_ = 0;
     answer_length_ = 0;
     state_ = State::kRunning;
+  }
+
+  // One burst of a zone block write: five sends under one id. The engine starts a new burst (new id) until the
+  // boiler answers, which can take minutes because the satellite only listens around its own slot.
+  void start_zone_write(uint8_t self_id, uint8_t association, uint8_t message_id, uint8_t zone_id,
+                        const uint8_t *block) {
+    start(self_id, association, message_id, 0, 0);
+    kind_ = Kind::kZoneWrite;
+    zone_id_ = zone_id;
+    memcpy(block_, block, kZoneBlockSize);
+    attempts_ = 1;
   }
 
   // Same retransmission pattern for the hot-water mode write; the answer is the boiler's INIT acknowledgement.
@@ -57,7 +69,7 @@ class ReadTransaction {
     if (state_ != State::kRunning) return Action::kNone;
     if (sends_ > 0 && now_ms - last_send_ms_ < kSendIntervalMs) return Action::kNone;
     if (sends_ >= kSendsPerAttempt) {
-      if (attempt_ + 1 >= kAttempts) {
+      if (attempt_ + 1 >= attempts_) {
         state_ = State::kFailed;
         return Action::kFailed;
       }
@@ -65,10 +77,17 @@ class ReadTransaction {
       ++message_id_;
       sends_ = 0;
     }
-    length = kind_ == Kind::kRead
-                 ? build_read_request(frame, capacity, self_id_, association_, message_id_, address_, size_words_)
-                 : build_hot_water_mode_write(frame, capacity, self_id_, association_, message_id_, mode_,
-                                              frame_bits_);
+    switch (kind_) {
+      case Kind::kRead:
+        length = build_read_request(frame, capacity, self_id_, association_, message_id_, address_, size_words_);
+        break;
+      case Kind::kHotWaterWrite:
+        length = build_hot_water_mode_write(frame, capacity, self_id_, association_, message_id_, mode_, frame_bits_);
+        break;
+      default:
+        length = build_zone_write(frame, capacity, self_id_, association_, message_id_, zone_id_, block_);
+        break;
+    }
     if (length == 0) {
       state_ = State::kFailed;
       return Action::kFailed;
@@ -84,6 +103,7 @@ class ReadTransaction {
     Header h;
     if (!parse_header(frame, length, h)) return false;
     const uint8_t reply_type = kind_ == Kind::kRead ? kRead : kInit;
+    if (kind_ == Kind::kZoneWrite) return false;  // the engine matches the block echo itself
     if (h.type != reply_type || h.reception != 0x81 || h.source != kIdBoiler || h.destination != self_id_ ||
         h.association != association_ || h.message_id != message_id_)
       return false;
@@ -96,7 +116,7 @@ class ReadTransaction {
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
-  enum class Kind : uint8_t { kRead, kHotWaterWrite };
+  enum class Kind : uint8_t { kRead, kHotWaterWrite, kZoneWrite };
   State state_ = State::kIdle;
   Kind kind_ = Kind::kRead;
   HotWaterMode mode_ = HotWaterMode::kUnknown;
@@ -104,8 +124,11 @@ class ReadTransaction {
   uint8_t self_id_ = kIdConnect;
   uint8_t association_ = 0xFF;
   uint8_t message_id_ = 0;
+  uint8_t zone_id_ = 0;
+  uint8_t block_[kZoneBlockSize] = {};
   uint16_t address_ = 0;
   uint16_t size_words_ = 0;
+  uint8_t attempts_ = kAttempts;
   uint8_t attempt_ = 0;
   uint8_t sends_ = 0;
   uint32_t last_send_ms_ = 0;
