@@ -221,6 +221,19 @@ static void test_builders_match_real_frames() {
   CHECK(n == ack.size());
   CHECK(n == ack.size() && memcmp(out, ack.data(), n) == 0);
 
+  // The same holds for a second real pair, captured live from the MQTT firmware on 2026-10-26.
+  const Bytes &relay_live = F["payload_zone_relay_live"];
+  const Bytes &ack_live = F["payload_zone_ack_live"];
+  const size_t n_live = build_zone_ack(relay_live.data(), relay_live.size(), kIdConnect, out, sizeof(out));
+  CHECK(n_live == ack_live.size());
+  CHECK(n_live == ack_live.size() && memcmp(out, ack_live.data(), n_live) == 0);
+  TxPolicy live_policy;
+  live_policy.level = TxLevel::kAck;
+  live_policy.dry_run = false;
+  live_policy.association = 0xE3;
+  CHECK(evaluate_tx(live_policy, ack_live.data(), ack_live.size(), relay_live.data(), relay_live.size()) ==
+        TxVerdict::kSend);
+
   // Not acknowledged: wrong addressee, an acknowledgement itself, a broadcast, a short buffer.
   CHECK(build_zone_ack(relay.data(), relay.size(), 0x55, out, sizeof(out)) == 0);
   CHECK(build_zone_ack(ack.data(), ack.size(), kIdConnect, out, sizeof(out)) == 0);
