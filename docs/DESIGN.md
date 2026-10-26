@@ -348,7 +348,7 @@ Première **écriture** émise par le firmware ESPHome, depuis le sélecteur « 
 - 9 lectures réussies, 0 échec, 0 trame bloquée, aucun avertissement hormis celui de la transmission réelle.
 - La seconde écriture est antérieure au début de la capture des journaux : elle est établie par l'état final (sélecteur, relecture, tableau de bord MQTT).
 
-### 10.8 Écriture des consignes de zone (construite et testée sur l'hôte, pas encore émise)
+### 10.8 Écriture des consignes de zone (construction et tests hôte)
 
 - Constructeur `build_zone_write` identique octet pour octet à la trame réelle du 25/10 (fixture `payload_zone_write`) ; la réponse réelle
   (`payload_zone_write_reply`) est reconnue par le moteur, y compris sous l'id d'une rafale précédente.
@@ -360,6 +360,19 @@ Première **écriture** émise par le firmware ESPHome, depuis le sélecteur « 
   Un relais reçu pendant l'écriture ne remplace pas le bloc connu ; une fois l'écho reçu, l'état est `verified` et le bloc connu est mis à jour.
 - Entités : trois `number` (confort, réduit, hors-gel de la zone 1) et le texte d'état `zone_write`.
 - Pas encore fait : persistance du bloc (il faut attendre un relais après le démarrage), écriture du mode et du programme, zones 2 et 3.
+
+### 10.9 Fenêtre d'écriture des consignes de zone du 26/10/2026 (15:47 – 16:14, `tx: write`, `dry_run: false`)
+
+Première écriture d'un **bloc de zone** émise par le firmware ESPHome (nombre « Zone 1 consigne confort » 20,5 → 20,0 °C) :
+
+- Le bloc n'est connu qu'après un relais : aucun relais en 6 min de lecture seule, il a fallu une modification sur le satellite (confort 20,5)
+  pour le provoquer ; la demande avant cela est refusée (comportement voulu).
+- Demande à 16:00:28, mise en attente jusqu'à la fin de la fenêtre silencieuse, première rafale à 16:02:27 (5 émissions à 2,2 s, trame
+  identique au format capturé, seul l'octet de confort change : `96`). Deuxième rafale (id suivant) à 16:03:09, **écho de la chaudière à 16:04:36**
+  (état `verified`, 2 min 10 après le début), diffusion du satellite à 16:04:37 avec la consigne 20,0 °C, relais de la chaudière accusé à 16:04:40.
+- L'octet d'options écrit était `25` ; le satellite le renvoie normalisé en `21` (bit `0x04` retiré) : le bloc connu suit toujours le dernier relais.
+- La lecture `79F2` a affiché l'ancienne consigne (20,5) jusqu'à ~2 min après, puis 20,0 : elle est retardée, pas fausse.
+- 18 émissions de bloc, 0 trame bloquée. Retour au firmware MQTT à 16:13 : aucune anomalie, programme identique à la sauvegarde.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
