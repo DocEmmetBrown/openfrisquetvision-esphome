@@ -164,6 +164,33 @@ static void test_satellite_broadcast() {
   CHECK(!plain_mode.connect_compat);
 }
 
+static void test_zone_block_and_fault_broadcast() {
+  frisquet::ZoneBlock z;
+  const Bytes &f = F["payload_zone_block"];
+  CHECK(f.size() == frisquet::kZoneBlockLength);
+  CHECK(frisquet::decode_zone_block(f.data(), f.size(), z));
+  CHECK_NEAR(z.comfort, 20.0f, 0.001f);
+  CHECK_NEAR(z.reduced, 17.0f, 0.001f);
+  CHECK_NEAR(z.frost, 8.0f, 0.001f);
+  CHECK(z.mode == 0x05 && z.options == 0x25);
+  CHECK(z.source == frisquet::kIdBoiler && z.destination == frisquet::kIdConnect);
+  Bytes wrong = f;
+  wrong[14] = 0x2F;
+  CHECK(!frisquet::decode_zone_block(wrong.data(), wrong.size(), z));
+  const Bytes &broadcast = F["payload_sat_broadcast"];
+  CHECK(!frisquet::decode_zone_block(broadcast.data(), broadcast.size(), z));
+
+  frisquet::SatelliteBroadcast b;
+  const Bytes &g = F["payload_sat_broadcast_fault"];
+  CHECK(frisquet::decode_satellite_broadcast(g.data(), g.size(), b));
+  CHECK(b.state_raw == 0x29 && b.weekday == 1);
+  CHECK(b.day == 0x26 && b.hour == 0x09 && b.minute == 0x20);
+  const frisquet::BoilerState st = frisquet::decode_boiler_state(b.state_raw);
+  CHECK(st.fault && st.running && !st.heating_stopped);
+  CHECK_NEAR(b.ambient[0], 18.9f, 0.001f);
+  CHECK_NEAR(b.setpoint[0], 19.0f, 0.001f);
+}
+
 static void test_zone_mode() {
   CHECK(frisquet::decode_zone_mode(0x10).mode == frisquet::ZoneMode::kFrostProtection);
   CHECK(frisquet::decode_zone_mode(0x30).mode == frisquet::ZoneMode::kFrostProtection);
@@ -377,6 +404,7 @@ int main() {
   test_boiler_info_rejects_wrong_frames();
   test_satellite_broadcast();
   test_zone_mode();
+  test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();
   test_read_tracker();

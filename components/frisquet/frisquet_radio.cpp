@@ -189,6 +189,21 @@ void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
     return;
   }
 
+  // Zone configuration blocks relayed by the boiler (the satellite's own settings and mode).
+  ::frisquet::ZoneBlock block;
+  if (::frisquet::decode_zone_block(payload, length, block)) {
+    char text[96];
+    snprintf(text, sizeof(text), "%02X->%02X mode=%02X options=%02X confort=%.1f réduit=%.1f hors-gel=%.1f",
+             block.source, block.destination, block.mode, block.options, block.comfort, block.reduced,
+             block.frost);
+    // The boiler repeats the block every few seconds: publish only changes.
+    if (this->last_zone_block_ != text) {
+      this->last_zone_block_ = text;
+      this->publish_text_(kZoneBlock, text);
+    }
+    return;
+  }
+
   // Answers to a Connect's reads, overheard when a real Connect is on the air.
   ::frisquet::ReadKind kind = ::frisquet::ReadKind::kUnknown;
   if (!this->tracker_.on_frame(payload, length, millis(), kind)) {
@@ -280,6 +295,9 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
   snprintf(text, sizeof(text), "20%02X-%02X-%02X %02X:%02X:%02X", b.year, b.month, b.day, b.hour, b.minute,
            b.second);
   this->publish_text_(kBoilerClock, text);
+  char raw[40];
+  snprintf(raw, sizeof(raw), "état=%02X mode=%02X jour=%u", b.state_raw, b.mode_raw[0], b.weekday);
+  this->publish_text_(kZone1Raw, raw);
   this->publish_activity_();
 }
 

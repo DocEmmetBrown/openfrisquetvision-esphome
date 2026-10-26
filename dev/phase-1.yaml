@@ -59,6 +59,10 @@ frisquet:
     name: Chaudière état
   boiler_clock:
     name: Chaudière horloge
+  zone1_raw:
+    name: Zone 1 octets bruts
+  zone_block:
+    name: Zone dernier bloc de configuration
   seconds_since_frame:
     name: Radio âge dernière trame
   rssi:
@@ -95,5 +99,8 @@ sensor:
       name: Fréquence CPU
 
 text_sensor:
+  - platform: debug
+    reset_reason:
+      name: Raison du dernier reset
   - platform: version
     name: ESPHome version

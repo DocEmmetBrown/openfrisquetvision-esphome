@@ -2,6 +2,8 @@
 
 #include <RadioLib.h>
 
+#include <string>
+
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/component.h"
@@ -51,6 +53,8 @@ enum TextId : uint8_t {
   kBoilerClock,
   kBoilerActivity,
   kHotWaterMode,
+  kZone1Raw,
+  kZoneBlock,
   kTextCount,
 };
 
@@ -96,6 +100,7 @@ class FrisquetRadio : public Component {
   uint32_t last_frame_ms_{0};
   uint32_t last_age_publish_ms_{0};
   bool frame_seen_{false};
+  std::string last_zone_block_;
   uint32_t valid_{0}, repaired_{0}, rejected_{0}, ignored_{0};
 
   ::frisquet::ReadTracker tracker_;

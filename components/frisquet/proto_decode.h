@@ -173,6 +173,43 @@ inline bool decode_satellite_broadcast(const uint8_t *frame, size_t length, Sate
   return true;
 }
 
+// ----- Zone configuration block (type 0x17, 63 bytes) -----
+//
+// The satellite writes its zone block to the boiler, which relays it to the Connect (and the
+// Connect writes it back): <hdr:6> A1 54 <size:2> A1 54 <size:2> 30 <comfort:1> <reduced:1>
+// <frost:1> <mode:1> <options:1> ... <weekly programme: 42 bytes>.
+// Setpoint bytes are tenths of a degree above 5 degrees (0x8C = 19.0). `options` has the same
+// bit layout as the satellite mode byte of the broadcast (0x01 comfort, 0x04 auto, 0x20 flag).
+struct ZoneBlock {
+  float comfort = NAN;
+  float reduced = NAN;
+  float frost = NAN;
+  uint8_t mode = 0xFF;
+  uint8_t options = 0xFF;
+  uint8_t source = 0;
+  uint8_t destination = 0;
+};
+
+constexpr size_t kZoneBlockLength = 63;
+
+inline float temperature8(uint8_t raw) { return raw / 10.0f + 5.0f; }
+
+inline bool decode_zone_block(const uint8_t *frame, size_t length, ZoneBlock &out) {
+  Header header;
+  if (!parse_header(frame, length, header) || header.type != kInit) return false;
+  if (length != kZoneBlockLength) return false;
+  if (frame[6] != 0xA1 || frame[7] != 0x54 || frame[10] != 0xA1 || frame[11] != 0x54 || frame[14] != 0x30)
+    return false;
+  out.comfort = temperature8(frame[15]);
+  out.reduced = temperature8(frame[16]);
+  out.frost = temperature8(frame[17]);
+  out.mode = frame[18];
+  out.options = frame[19];
+  out.source = header.source;
+  out.destination = header.destination;
+  return true;
+}
+
 // ----- Other read responses -----
 
 // 0x7A18: daily consumption (kWh), two big-endian words after 18 bytes of unknown data.

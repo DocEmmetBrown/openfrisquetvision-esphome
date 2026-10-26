@@ -21,6 +21,12 @@ payload_sat_broadcast = 08 80 FA C0 81 17 2A 05 0A 00 00 26 10 25 17 57 03 28 00
 # Same kind of broadcast at 13:10:12, plain mode byte 0x05
 payload_sat_broadcast_plain = 08 80 FA 28 81 17 2A 05 0A 00 00 26 10 25 13 10 12 28 00 00 C8 00 BE 00 05 01 29 00 FF 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
 
+# Boiler -> zone-1 satellite broadcast at 2026-10-26 09:20:12: fault bit set while running (state 0x29), weekday 1
+payload_sat_broadcast_fault = 08 80 FA BC 81 17 2A 05 0A 00 00 26 10 26 09 20 12 29 01 00 BD 00 BE 00 25 01 C9 01 B8 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
+
+# Zone-1 configuration block relayed by the boiler to the Connect (17:57:06): comfort 0x96, reduced 0x78, frost 0x1E, mode 05, options 25
+payload_zone_block = 7E 80 E3 C4 08 17 A1 54 00 15 A1 54 00 18 30 96 78 1E 05 25 00 00 00 F8 FF FF 0F 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 F8 FF FF 0F
+
 # 0x7A18 consumption (both counters 0 on this boiler)
 payload_7a18 = 7E 80 E3 1A 81 03 38 00 01 4B 08 14 3C 4B 0F 14 50 4B 0F 14 50 07 13 00 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 08 27 00 FF 7E FF FF
 

@@ -117,6 +117,9 @@ TEXT_SENSORS = {
     "boiler_clock": text_sensor.text_sensor_schema(),
     "boiler_activity": text_sensor.text_sensor_schema(),
     "hot_water_mode": text_sensor.text_sensor_schema(),
+    # Raw bytes for diagnosis: broadcast state/mode, and the last relayed zone block.
+    "zone1_raw": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    "zone_block": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 
