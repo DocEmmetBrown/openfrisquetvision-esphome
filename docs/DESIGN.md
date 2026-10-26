@@ -278,6 +278,21 @@ Constats : l'OTA ne change ni bootloader ni partitions (conservés : slots de 6,
 au démarrage, avant `safe_mode`, ne se récupère pas à distance. Chaque nouvelle image reste donc de la **même famille** que l'image
 déjà prouvée (même carte, mêmes options flash) et la radio est activée progressivement.
 
+### 10.3 Constat du 26/10/2026 : une écoute seule ne peut pas durer
+
+Après ~11 h avec l'image d'écoute seule (Connect absent depuis 22:00), la chaudière affichait **« anomalie avec Connect »** :
+l'octet d'état de la diffusion avait le bit 0 (anomalie) à 1 (`0x29`), alors que la chaudière chauffait toujours. Elle relayait
+alors toutes les ~4 s le bloc de configuration de la zone 1 vers le Connect (`0x7E`) sans recevoir d'accusé. Le firmware MQTT,
+rétabli par OTA, a de nouveau accusé ces relais et l'anomalie a disparu (vérifié sur le tableau de bord).
+
+Conséquences :
+
+- l'écoute seule n'est utilisable que par **fenêtres courtes** (l'anomalie n'était pas présente après 40 minutes ; le seuil est inconnu) ;
+- le **minimum viable d'un Connect** est d'accuser les relais de zone (réponse en écho du bloc avec réception `0x88`),
+  pas seulement de lire. Cette réponse est avancée en tête de la phase 2c et testée sur les trames réelles avant tout envoi ;
+- tout essai ESPHome sur la carte unique est précédé d'un plan de retour (OTA du firmware MQTT, prouvé en 12 s) ;
+- les diagnostics « octets bruts » et « dernier bloc de configuration » sont conservés pour analyser les modes dans l'historique HA.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Option de compilation `frisquet: tx: none | read | write` ; `none` ne compile **aucun** chemin d'émission (phases R à 1).

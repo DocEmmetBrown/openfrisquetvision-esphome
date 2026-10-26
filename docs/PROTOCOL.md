@@ -78,9 +78,13 @@ jour de la semaine (1, 0 = dimanche), puis par zone (Z1, Z2, Z3 ; 10 octets chac
 
 ## Échanges de zone (type 0x17, 63 octets)
 
-Écriture du bloc de configuration d'une zone : `A1 54 00 18` (lecture) `A1 54 00 18` (écriture) `30` (48 octets) puis
-modes, consignes et **programme hebdomadaire de 42 octets** (7 jours × 6 octets, dimanche d'abord, bit 1 = confort,
-bit 0 de l'octet 0 = 00:00-00:30). Le Connect écrit toujours le bloc complet.
+La chaudière relaie vers le Connect (`7E 80 E3 <id> 08 17 …`, réception `0x08` = zone 1) le bloc que le satellite écrit ; le Connect
+**doit accuser** par un écho (`80 7E E3 <id> 88 17 30 …`, réception `0x88`). Sans accusé, la chaudière répète le relais toutes les ~4 s et
+finit par afficher **« anomalie avec Connect »** (bit 0 de l'octet d'état de la diffusion, vu après ~11 h sans Connect).
+
+Bloc : `A1 54 <taille>` (lecture) `A1 54 <taille>` (écriture) `30` (48 octets) puis consigne confort, réduit, hors gel (en dixièmes de °C
+au-dessus de 5 °C : `0x8C` = 19,0), mode (`05` auto), options (`25` = auto + confort + indicateur `0x20`), puis le **programme hebdomadaire de 42 octets**
+(7 jours × 6 octets, dimanche d'abord, bit 1 = confort, bit 0 de l'octet 0 = 00:00-00:30).
 
 ## Créneaux (cycle de 10 minutes)
 
