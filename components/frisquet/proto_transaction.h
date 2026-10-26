@@ -20,6 +20,7 @@ class ReadTransaction {
 
   void start(uint8_t self_id, uint8_t association, uint8_t first_message_id, uint16_t address,
              uint16_t size_words) {
+    kind_ = Kind::kRead;
     self_id_ = self_id;
     association_ = association;
     message_id_ = first_message_id;
@@ -30,6 +31,15 @@ class ReadTransaction {
     last_send_ms_ = 0;
     answer_length_ = 0;
     state_ = State::kRunning;
+  }
+
+  // Same retransmission pattern for the hot-water mode write; the answer is the boiler's INIT acknowledgement.
+  void start_hot_water_write(uint8_t self_id, uint8_t association, uint8_t first_message_id, HotWaterMode mode,
+                             uint8_t frame_bits) {
+    start(self_id, association, first_message_id, 0, 0);
+    kind_ = Kind::kHotWaterWrite;
+    mode_ = mode;
+    frame_bits_ = frame_bits;
   }
 
   bool active() const { return state_ == State::kRunning; }
@@ -55,7 +65,10 @@ class ReadTransaction {
       ++message_id_;
       sends_ = 0;
     }
-    length = build_read_request(frame, capacity, self_id_, association_, message_id_, address_, size_words_);
+    length = kind_ == Kind::kRead
+                 ? build_read_request(frame, capacity, self_id_, association_, message_id_, address_, size_words_)
+                 : build_hot_water_mode_write(frame, capacity, self_id_, association_, message_id_, mode_,
+                                              frame_bits_);
     if (length == 0) {
       state_ = State::kFailed;
       return Action::kFailed;
@@ -70,7 +83,8 @@ class ReadTransaction {
     if (state_ != State::kRunning) return false;
     Header h;
     if (!parse_header(frame, length, h)) return false;
-    if (h.type != kRead || h.reception != 0x81 || h.source != kIdBoiler || h.destination != self_id_ ||
+    const uint8_t reply_type = kind_ == Kind::kRead ? kRead : kInit;
+    if (h.type != reply_type || h.reception != 0x81 || h.source != kIdBoiler || h.destination != self_id_ ||
         h.association != association_ || h.message_id != message_id_)
       return false;
     if (length > sizeof(answer_)) return false;
@@ -82,7 +96,11 @@ class ReadTransaction {
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
+  enum class Kind : uint8_t { kRead, kHotWaterWrite };
   State state_ = State::kIdle;
+  Kind kind_ = Kind::kRead;
+  HotWaterMode mode_ = HotWaterMode::kUnknown;
+  uint8_t frame_bits_ = 0;
   uint8_t self_id_ = kIdConnect;
   uint8_t association_ = 0xFF;
   uint8_t message_id_ = 0;

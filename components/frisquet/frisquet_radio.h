@@ -7,6 +7,10 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/component.h"
+#include "esphome/core/defines.h"
+#ifdef USE_SELECT
+#include "esphome/components/select/select.h"
+#endif
 
 #include "proto_crc.h"
 #include "proto_decode.h"
@@ -68,6 +72,7 @@ enum TextId : uint8_t {
   kHotWaterMode,
   kZone1Raw,
   kZoneBlock,
+  kHotWaterWrite,
   kTextCount,
 };
 
@@ -96,6 +101,13 @@ class FrisquetRadio : public Component {
   void set_kill_switch(bool killed);
   bool kill_switch() const { return killed_; }
 
+  // Hot-water (ECS) mode: `name` is one of the select's options. False when it cannot be queued.
+  bool request_hot_water_mode(const std::string &name);
+  void republish_hot_water_mode();
+#ifdef USE_SELECT
+  void set_hot_water_select(select::Select *s) { hot_water_select_ = s; }
+#endif
+
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -115,6 +127,7 @@ class FrisquetRadio : public Component {
 #ifdef FRISQUET_TX_ENABLED
   void tx_step_(uint32_t now);
   void transmit_pending_();
+  void sync_hot_water_();
 #endif
 
   uint8_t cs_{8}, irq_{14}, reset_{12}, busy_{13}, sck_{9}, miso_{11}, mosi_{10};
@@ -147,6 +160,11 @@ class FrisquetRadio : public Component {
   uint32_t pending_tx_due_ms_{0};
   uint32_t last_stats_ms_{0};
   uint32_t tx_errors_{0};
+  ::frisquet::WriteState last_write_state_{::frisquet::WriteState::kIdle};
+  int last_published_mode_{-1};
+#endif
+#ifdef USE_SELECT
+  select::Select *hot_water_select_{nullptr};
 #endif
 
   sensor::Sensor *sensors_[kSensorCount]{};

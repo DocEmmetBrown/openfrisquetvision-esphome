@@ -91,6 +91,13 @@ Bloc : `A1 54 <taille>` (lecture) `A1 54 <taille>` (écriture) `30` (48 octets) 
 au-dessus de 5 °C : `0x8C` = 19,0), mode (`05` auto), options (`25` = auto + confort + indicateur `0x20`), puis le **programme hebdomadaire de 42 octets**
 (7 jours × 6 octets, dimanche d'abord, bit 1 = confort, bit 0 de l'octet 0 = 00:00-00:30).
 
+## Écriture du mode ECS (type 0x17, direct) *(dérivé du code de l'ancien firmware, non encore capturé sur l'air)*
+
+`80 <connect> <assoc> <id> 01 17 A0 FC 00 01 A0 FC 00 01 02 00 <octet de mode>` (17 octets). L'octet de mode est le mode (bits `0x7E` :
+`00` Max, `08` Eco, `10` Eco Horaires, `18` Eco+, `20` Eco+ Horaires, `28` Stop) plus les **bits de trame** `0x81` lus avec la valeur
+actuelle (`0x90` = `0x80` + Eco Horaires sur cette installation). La chaudière répond par un accusé INIT (réception `0x81`, type `0x17`) ;
+l'ancien firmware ne relit pas la valeur, le nouveau la relit (`A0FC`) et ne déclare l'écriture réussie que si elle correspond.
+
 ## Créneaux (cycle de 10 minutes)
 
 | Instant | Émetteur | Action |

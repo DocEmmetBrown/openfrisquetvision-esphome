@@ -308,7 +308,7 @@ static void test_tx_gate() {
   zone_write[0] = kIdBoiler;
   zone_write[1] = kIdConnect;
   zone_write[4] = 0x08;  // a write, not an acknowledgement
-  CHECK(evaluate_tx(p, zone_write.data(), zone_write.size()) == TxVerdict::kBlockedUnknownFrame);
+  CHECK(evaluate_tx(p, zone_write.data(), zone_write.size()) == TxVerdict::kMalformed);  // zone writes: not recognised
   CHECK(evaluate_tx(p, req.data(), 9) == TxVerdict::kMalformed);
   CHECK(evaluate_tx(p, nullptr, 0) == TxVerdict::kMalformed);
 }
@@ -605,6 +605,171 @@ static void test_engine_schedule_and_failure() {
   CHECK(a.poll(2200, tx) && tx.kind == TxClass::kReadRequest && tx.frame[3] == 0x20);
 }
 
+static void test_hot_water_write_frame_and_gate() {
+  using namespace frisquet;
+  uint8_t out[32];
+  // Derived from the MQTT firmware's envoyerModeECS(): not yet captured live (see PROTOCOL.md).
+  const size_t n = build_hot_water_mode_write(out, sizeof(out), kIdConnect, 0xE3, 0x8A, HotWaterMode::kEco, 0x80);
+  const uint8_t expected[17] = {0x80, 0x7E, 0xE3, 0x8A, 0x01, 0x17, 0xA0, 0xFC, 0x00,
+                                0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00, 0x88};
+  CHECK(n == sizeof(expected) && memcmp(out, expected, n) == 0);
+  CHECK(encode_hot_water_mode(HotWaterMode::kEcoScheduled, 0x80) == 0x90);  // the value read on this boiler
+  CHECK(encode_hot_water_mode(HotWaterMode::kStop, 0x01) == 0x29);
+  CHECK(build_hot_water_mode_write(out, 16, kIdConnect, 0xE3, 1, HotWaterMode::kEco, 0) == 0);
+  CHECK(build_hot_water_mode_write(out, sizeof(out), kIdConnect, 0xE3, 1, HotWaterMode::kUnknown, 0) == 0);
+
+  TxPolicy p;
+  p.association = 0xE3;
+  p.dry_run = false;
+  TxClass cls = TxClass::kUnknown;
+  p.level = TxLevel::kAck;
+  CHECK(evaluate_tx(p, expected, sizeof(expected), nullptr, 0, &cls) == TxVerdict::kBlockedLevel);
+  CHECK(cls == TxClass::kHotWaterWrite);
+  p.level = TxLevel::kRead;
+  CHECK(evaluate_tx(p, expected, sizeof(expected)) == TxVerdict::kBlockedLevel);
+  p.level = TxLevel::kWrite;
+  CHECK(evaluate_tx(p, expected, sizeof(expected)) == TxVerdict::kSend);
+  p.dry_run = true;
+  CHECK(evaluate_tx(p, expected, sizeof(expected)) == TxVerdict::kDryRun);
+  p.dry_run = false;
+
+  // Only this exact write: another address, an unknown mode, another length or sender are refused.
+  uint8_t bad[17];
+  memcpy(bad, expected, sizeof(bad));
+  bad[7] = 0xFD;  // another memory address
+  CHECK(evaluate_tx(p, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  bad[10] = 0xA1;  // the write address differs from the read address
+  CHECK(evaluate_tx(p, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  bad[16] = 0x38;  // 0x38 is not a hot-water mode
+  CHECK(evaluate_tx(p, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  bad[15] = 0x01;
+  CHECK(evaluate_tx(p, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  bad[1] = 0x08;  // not sent by the Connect
+  CHECK(evaluate_tx(p, bad, sizeof(bad)) == TxVerdict::kBlockedIdentity);
+  CHECK(evaluate_tx(p, expected, 16) == TxVerdict::kMalformed);
+  p.kill_switch = true;
+  CHECK(evaluate_tx(p, expected, sizeof(expected)) == TxVerdict::kBlockedKillSwitch);
+}
+
+static Bytes with_id(const Bytes &frame, uint8_t id) {
+  Bytes copy = frame;
+  copy[3] = id;
+  return copy;
+}
+
+static void test_engine_hot_water_write() {
+  using namespace frisquet;
+  ReadResult result;
+  TxRequest tx;
+  uint32_t now = 0;
+
+  // Brings an engine to the point where it knows the hot-water mode (0x90: Eco scheduled, frame bit 0x80).
+  auto make_ready = [&](ConnectEngine &e, TxLevel level, bool dry_run) {
+    e.set_policy(engine_policy(level, dry_run));
+    e.set_next_message_id(0x86);
+    e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+    e.request_initial_reads();
+    const char *answers[4] = {"payload_79f2_idle", "payload_7a18", "payload_a063", "payload_a0fc"};
+    for (int i = 0; i < 4; ++i) {
+      CHECK(e.poll(now, tx));
+      CHECK(e.on_frame(now + 50, with_id(F[answers[i]], tx.frame[3]).data(), F[answers[i]].size(), result));
+      now += 100;
+    }
+  };
+
+  // Not known before the first read of 0xA0FC: the request is refused.
+  ConnectEngine early;
+  early.set_policy(engine_policy(TxLevel::kWrite, false));
+  CHECK(!early.hot_water_mode_known());
+  CHECK(!early.request_hot_water_mode(HotWaterMode::kEco));
+  CHECK(early.write_state() == WriteState::kIdle);
+
+  // Full life: write, boiler acknowledgement, read-back, verified.
+  ConnectEngine e;
+  make_ready(e, TxLevel::kWrite, false);
+  CHECK(e.hot_water_mode_known() && e.hot_water_mode() == HotWaterMode::kEcoScheduled);
+  CHECK(!e.request_hot_water_mode(HotWaterMode::kUnknown));
+  CHECK(e.request_hot_water_mode(HotWaterMode::kEco));
+  CHECK(e.write_state() == WriteState::kQueued);
+  CHECK(!e.request_hot_water_mode(HotWaterMode::kMax));  // one write at a time
+  CHECK(e.poll(now, tx));
+  CHECK(tx.kind == TxClass::kHotWaterWrite && tx.verdict == TxVerdict::kSend && tx.length == 17);
+  CHECK(tx.frame[3] == 0x8A && tx.frame[16] == 0x88);
+  CHECK(e.write_state() == WriteState::kSending);
+  const uint8_t write_id = tx.frame[3];
+  // The boiler's INIT acknowledgement (content not captured yet: the exchange matters, not the data).
+  const Bytes init_ack = {0x7E, 0x80, 0xE3, write_id, 0x81, 0x17, 0x02, 0x00, 0x88};
+  CHECK(!e.on_frame(now + 100, init_ack.data(), init_ack.size(), result));
+  CHECK(e.write_state() == WriteState::kAcked);
+  CHECK(e.stats().writes_acked == 1);
+  // The read-back comes next, ahead of the scheduled reads.
+  now += 200;
+  CHECK(e.poll(now, tx) && tx.kind == TxClass::kReadRequest && be16(tx.frame + 6) == 0xA0FC);
+  const Bytes verify = {0x7E, 0x80, 0xE3, tx.frame[3], 0x81, 0x03, 0x02, 0x00, 0x88};
+  CHECK(e.on_frame(now + 50, verify.data(), verify.size(), result));
+  CHECK(e.write_state() == WriteState::kVerified);
+  CHECK(e.hot_water_mode() == HotWaterMode::kEco);
+  CHECK(e.stats().writes_verified == 1 && e.stats().writes_failed == 0);
+  CHECK(e.request_hot_water_mode(HotWaterMode::kMax));  // a new write is possible afterwards
+
+  // The read-back shows another mode: the write is reported as failed.
+  ConnectEngine mismatch;
+  now = 0;
+  make_ready(mismatch, TxLevel::kWrite, false);
+  CHECK(mismatch.request_hot_water_mode(HotWaterMode::kEco));
+  CHECK(mismatch.poll(now, tx));
+  const Bytes ack2 = {0x7E, 0x80, 0xE3, tx.frame[3], 0x81, 0x17, 0x02, 0x00, 0x88};
+  mismatch.on_frame(now + 100, ack2.data(), ack2.size(), result);
+  now += 200;
+  CHECK(mismatch.poll(now, tx));
+  const Bytes wrong = {0x7E, 0x80, 0xE3, tx.frame[3], 0x81, 0x03, 0x02, 0x00, 0x90};
+  mismatch.on_frame(now + 50, wrong.data(), wrong.size(), result);
+  CHECK(mismatch.write_state() == WriteState::kFailed && mismatch.stats().writes_failed == 1);
+
+  // No acknowledgement from the boiler: ten sends in two attempts, then failed; reads still work.
+  ConnectEngine silent;
+  now = 0;
+  make_ready(silent, TxLevel::kWrite, false);
+  CHECK(silent.request_hot_water_mode(HotWaterMode::kStop));
+  int sends = 0;
+  const uint32_t t0 = now;
+  for (uint32_t t = t0; t <= t0 + 23000; t += 100)
+    if (silent.poll(t, tx) && tx.kind == TxClass::kHotWaterWrite) ++sends;
+  CHECK(sends == 10);
+  CHECK(silent.write_state() == WriteState::kFailed && silent.stats().writes_failed == 1);
+  CHECK(!silent.reading());
+
+  // Insufficient level or dry run: the frame is judged but never sent, and the state says so.
+  ConnectEngine low;
+  now = 0;
+  make_ready(low, TxLevel::kAck, false);
+  CHECK(low.request_hot_water_mode(HotWaterMode::kEco));
+  CHECK(low.poll(now, tx) && tx.verdict == TxVerdict::kBlockedLevel);
+  CHECK(low.write_state() == WriteState::kNotSent && !low.reading());
+
+  ConnectEngine dry;
+  now = 0;
+  make_ready(dry, TxLevel::kWrite, false);
+  dry.set_policy(engine_policy(TxLevel::kWrite, true));  // dry-run reads would never be answered
+  CHECK(dry.request_hot_water_mode(HotWaterMode::kEco));
+  CHECK(dry.poll(now, tx) && tx.verdict == TxVerdict::kDryRun && tx.kind == TxClass::kHotWaterWrite);
+  CHECK(dry.write_state() == WriteState::kNotSent);
+
+  // A write waits for the end of the satellites' quiet window.
+  ConnectEngine q;
+  now = 0;
+  make_ready(q, TxLevel::kWrite, false);
+  q.clock().set_from_bcd(now, 0x26, 0x10, 0x25, 0x18, 0x00, 0x30);  // 0:30 into the cycle
+  CHECK(q.request_hot_water_mode(HotWaterMode::kEco));
+  CHECK(!q.poll(now, tx));
+  CHECK(q.write_state() == WriteState::kQueued);
+  CHECK(q.poll(now + 120000, tx) && tx.kind == TxClass::kHotWaterWrite);
+}
+
 static void test_zone_mode() {
   // 0x20 is Auto, reduced (verified: the satellite stayed in Auto while the programme went reduced).
   const Bytes &reduced = F["payload_sat_broadcast_reduced"];
@@ -845,6 +1010,8 @@ int main() {
   test_engine_acknowledges_zone_relays();
   test_engine_reads();
   test_engine_schedule_and_failure();
+  test_hot_water_write_frame_and_gate();
+  test_engine_hot_water_write();
   test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();

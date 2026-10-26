@@ -79,6 +79,76 @@ void FrisquetRadio::set_kill_switch(bool killed) {
 #endif
 }
 
+namespace {
+struct HotWaterName {
+  const char *name;
+  ::frisquet::HotWaterMode mode;
+};
+// Same labels and order as HOT_WATER_OPTIONS in select.py.
+const HotWaterName HOT_WATER_MODES[] = {
+    {"Max", ::frisquet::HotWaterMode::kMax},
+    {"Eco", ::frisquet::HotWaterMode::kEco},
+    {"Eco Horaires", ::frisquet::HotWaterMode::kEcoScheduled},
+    {"Eco+", ::frisquet::HotWaterMode::kEcoPlus},
+    {"Eco+ Horaires", ::frisquet::HotWaterMode::kEcoPlusScheduled},
+    {"Stop", ::frisquet::HotWaterMode::kStop},
+};
+}  // namespace
+
+bool FrisquetRadio::request_hot_water_mode(const std::string &name) {
+#ifdef FRISQUET_TX_ENABLED
+  for (const HotWaterName &entry : HOT_WATER_MODES) {
+    if (name == entry.name) return this->engine_.request_hot_water_mode(entry.mode);
+  }
+#else
+  (void) name;
+#endif
+  return false;
+}
+
+void FrisquetRadio::republish_hot_water_mode() {
+#ifdef FRISQUET_TX_ENABLED
+  this->last_published_mode_ = -1;  // forces sync_hot_water_() to publish the boiler's mode again
+#endif
+}
+
+#ifdef FRISQUET_TX_ENABLED
+void FrisquetRadio::sync_hot_water_() {
+  const ::frisquet::WriteState state = this->engine_.write_state();
+  if (state != this->last_write_state_) {
+    this->last_write_state_ = state;
+    const char *name = "idle";
+    switch (state) {
+      case ::frisquet::WriteState::kQueued: name = "queued"; break;
+      case ::frisquet::WriteState::kSending: name = "sending"; break;
+      case ::frisquet::WriteState::kAcked: name = "acked"; break;
+      case ::frisquet::WriteState::kVerified: name = "verified"; break;
+      case ::frisquet::WriteState::kFailed: name = "failed"; break;
+      case ::frisquet::WriteState::kNotSent: name = "not-sent"; break;
+      default: break;
+    }
+    ESP_LOGI(TAG, "Hot-water mode write: %s", name);
+    this->publish_text_(kHotWaterWrite, name);
+  }
+  if (this->engine_.hot_water_mode_known()) {
+    const int mode = static_cast<int>(this->engine_.hot_water_mode());
+    if (mode != this->last_published_mode_) {
+      this->last_published_mode_ = mode;
+#ifdef USE_SELECT
+      if (this->hot_water_select_ != nullptr) {
+        for (const HotWaterName &entry : HOT_WATER_MODES) {
+          if (static_cast<int>(entry.mode) == mode) {
+            this->hot_water_select_->publish_state(entry.name);
+            break;
+          }
+        }
+      }
+#endif
+    }
+  }
+}
+#endif
+
 void FrisquetRadio::setup() {
   if (this->fem_) {
     pinMode(FEM_POWER_PIN, OUTPUT);
@@ -129,7 +199,9 @@ void FrisquetRadio::setup() {
 
 #ifdef FRISQUET_TX_ENABLED
   ::frisquet::TxPolicy policy;
-  policy.level = this->tx_level_ >= 2 ? ::frisquet::TxLevel::kAck : ::frisquet::TxLevel::kRead;
+  policy.level = this->tx_level_ >= 3   ? ::frisquet::TxLevel::kWrite
+                 : this->tx_level_ >= 2 ? ::frisquet::TxLevel::kAck
+                                        : ::frisquet::TxLevel::kRead;
   policy.dry_run = this->dry_run_;
   policy.kill_switch = this->killed_;
   policy.self_id = ::frisquet::kIdConnect;
@@ -177,11 +249,13 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
   switch (kind) {
     case ::frisquet::TxClass::kReadRequest: return "read";
     case ::frisquet::TxClass::kZoneAck: return "zone-ack";
+    case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
     default: return "?";
   }
 }
 
 void FrisquetRadio::tx_step_(uint32_t now) {
+  this->sync_hot_water_();
   if (this->pending_tx_valid_) {
     if (static_cast<int32_t>(now - this->pending_tx_due_ms_) >= 0) this->transmit_pending_();
     return;
@@ -453,7 +527,10 @@ void FrisquetRadio::dump_config() {
   ESP_LOGCONFIG(TAG, "  RX bandwidth: %.1f kHz", this->rx_bandwidth_);
   if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
 #ifdef FRISQUET_TX_ENABLED
-  ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s", this->tx_level_ >= 2 ? "reads + zone acks" : "reads only",
+  ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s",
+                this->tx_level_ >= 3 ? "reads + zone acks + hot-water mode writes"
+                : this->tx_level_ >= 2 ? "reads + zone acks"
+                                       : "reads only",
                 this->association_, this->dry_run_ ? "DRY RUN (nothing is transmitted)" : "LIVE");
   if (!this->dry_run_) ESP_LOGW(TAG, "  Live transmission is enabled: this device acts as the boiler's Connect.");
 #else

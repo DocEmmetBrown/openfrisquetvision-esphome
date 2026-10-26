@@ -69,4 +69,37 @@ inline size_t build_zone_ack(const uint8_t *relay, size_t relay_length, uint8_t 
   return kZoneAckLength;
 }
 
+// 0xA0FC hot-water mode write (type 0x17, direct message): read and write of the same word, 2 data bytes.
+//   80 <self> <assoc> <id> 01 17 A0 FC 00 01 A0 FC 00 01 02 00 <mode byte>
+// The mode byte is the mode (bits 0x7E) plus the frame bits (0x81) last read from the boiler.
+constexpr size_t kHotWaterModeWriteLength = 17;
+
+inline bool is_valid_hot_water_mode(uint8_t mode_bits) {
+  switch (mode_bits) {
+    case 0x00: case 0x08: case 0x10: case 0x18: case 0x20: case 0x28: return true;
+    default: return false;
+  }
+}
+
+inline uint8_t encode_hot_water_mode(HotWaterMode mode, uint8_t frame_bits) {
+  return static_cast<uint8_t>((static_cast<uint8_t>(mode) & 0x7E) | (frame_bits & 0x81));
+}
+
+inline size_t build_hot_water_mode_write(uint8_t *out, size_t capacity, uint8_t requester, uint8_t association,
+                                         uint8_t message_id, HotWaterMode mode, uint8_t frame_bits) {
+  if (!out || capacity < kHotWaterModeWriteLength || !is_valid_hot_water_mode(static_cast<uint8_t>(mode))) return 0;
+  Header h;
+  h.destination = kIdBoiler;
+  h.source = requester;
+  h.association = association;
+  h.message_id = message_id;
+  h.reception = 0x01;
+  h.type = kInit;
+  write_header(out, h);
+  static const uint8_t kBody[10] = {0xA0, 0xFC, 0x00, 0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00};
+  memcpy(out + 6, kBody, sizeof(kBody));
+  out[16] = encode_hot_water_mode(mode, frame_bits);
+  return kHotWaterModeWriteLength;
+}
+
 }  // namespace frisquet

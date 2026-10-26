@@ -128,6 +128,8 @@ TEXT_SENSORS = {
     # Raw bytes for diagnosis: broadcast state/mode, and the last relayed zone block.
     "zone1_raw": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     "zone_block": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # State of the last hot-water mode write: queued, sending, acked, verified, failed, not-sent.
+    "hot_water_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 
@@ -166,7 +168,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Required(CONF_NETWORK_ID): network_id,
         # none: no transmit path is compiled. read: scheduled reads only. ack: reads and the
         # acknowledgement of the boiler's zone relays (what a Connect must do).
-        cv.Optional(CONF_TX, default="none"): cv.one_of("none", "read", "ack", lower=True),
+        cv.Optional(CONF_TX, default="none"): cv.one_of("none", "read", "ack", "write", lower=True),
         # While true, frames are built, checked and logged but never transmitted.
         cv.Optional(CONF_DRY_RUN, default=True): cv.boolean,
         cv.Optional(CONF_ASSOCIATION): cv.hex_uint8_t,
@@ -207,7 +209,7 @@ async def to_code(config):
     if config[CONF_TX] != "none":
         # The transmit path only exists in builds that ask for it.
         cg.add_define("FRISQUET_TX_ENABLED")
-        level = {"read": 1, "ack": 2}[config[CONF_TX]]
+        level = {"read": 1, "ack": 2, "write": 3}[config[CONF_TX]]
         cg.add(var.set_tx(level, config[CONF_DRY_RUN], config[CONF_ASSOCIATION]))
 
     for index, key in enumerate(SENSORS):

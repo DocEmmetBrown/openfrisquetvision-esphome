@@ -25,7 +25,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite };
 
 struct TxPolicy {
   TxLevel level = TxLevel::kNone;
@@ -67,6 +67,9 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   } else if (header.type == kInit && header.is_ack()) {
     if (length != kZoneAckLength || frame[6] != 0x30) return TxVerdict::kMalformed;
     cls = TxClass::kZoneAck;
+  } else if (header.type == kInit) {
+    if (length != kHotWaterModeWriteLength || header.reception != 0x01) return TxVerdict::kMalformed;
+    cls = TxClass::kHotWaterWrite;
   } else {
     return TxVerdict::kBlockedUnknownFrame;
   }
@@ -81,6 +84,12 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     if (classify_read_address(address) == ReadKind::kUnknown || words == 0 || words > kMaxReadWords)
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kRead) return TxVerdict::kBlockedLevel;
+  } else if (cls == TxClass::kHotWaterWrite) {
+    // Exactly the write the MQTT firmware sends, with a known hot-water mode: nothing else.
+    static const uint8_t kBody[10] = {0xA0, 0xFC, 0x00, 0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00};
+    if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0 || !is_valid_hot_water_mode(frame[16] & 0x7E))
+      return TxVerdict::kBlockedAddress;
+    if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
   } else {
     uint8_t expected[kZoneAckLength];
     if (!relay ||

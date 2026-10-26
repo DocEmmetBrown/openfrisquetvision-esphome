@@ -21,7 +21,13 @@ struct EngineStats {
   uint32_t reads_failed = 0;
   uint32_t dry_runs = 0;
   uint32_t blocked = 0;
+  uint32_t writes_acked = 0;
+  uint32_t writes_verified = 0;
+  uint32_t writes_failed = 0;
 };
+
+// Life of a hot-water mode write: queued, sent until the boiler acknowledges, then read back.
+enum class WriteState : uint8_t { kIdle, kQueued, kSending, kAcked, kVerified, kFailed, kNotSent };
 
 struct TxRequest {
   uint8_t frame[64] = {};
@@ -54,6 +60,22 @@ class ConnectEngine {
     enqueue_(ReadKind::kHotWaterMode);
   }
 
+  // Ask for a hot-water mode change. Refused while another write is under way, and until a read of
+  // 0xA0FC has told us the frame bits to preserve (never guess them).
+  bool request_hot_water_mode(HotWaterMode mode) {
+    if (!is_valid_hot_water_mode(static_cast<uint8_t>(mode)) || !hot_water_known_) return false;
+    if (write_state_ == WriteState::kQueued || write_state_ == WriteState::kSending ||
+        write_state_ == WriteState::kAcked)
+      return false;
+    requested_mode_ = mode;
+    write_state_ = WriteState::kQueued;
+    return true;
+  }
+  WriteState write_state() const { return write_state_; }
+  HotWaterMode requested_hot_water_mode() const { return requested_mode_; }
+  HotWaterMode hot_water_mode() const { return hot_water_mode_; }
+  bool hot_water_mode_known() const { return hot_water_known_; }
+
   // Every validated frame. Returns true when it completes the running read.
   bool on_frame(uint32_t now_ms, const uint8_t *payload, size_t length, ReadResult &result) {
     if (is_zone_relay(payload, length, policy_.self_id) && length <= sizeof(relay_)) {
@@ -62,11 +84,36 @@ class ConnectEngine {
       ack_pending_ = true;
     }
     if (transaction_.active() && transaction_.on_frame(payload, length)) {
+      next_id_ = transaction_.next_message_id();
+      if (writing_) {
+        // The boiler acknowledged the write: read it back before calling it done.
+        writing_ = false;
+        write_state_ = WriteState::kAcked;
+        ++stats_.writes_acked;
+        enqueue_front_(ReadKind::kHotWaterMode);
+        return false;
+      }
       result.kind = current_kind_;
       result.length = transaction_.answer_length();
       memcpy(result.frame, transaction_.answer(), result.length);
       ++stats_.reads_ok;
-      next_id_ = transaction_.next_message_id();
+      if (result.kind == ReadKind::kHotWaterMode) {
+        DecodedHotWaterMode decoded;
+        if (decode_hot_water_mode(result.frame, result.length, decoded) && decoded.mode != HotWaterMode::kUnknown) {
+          hot_water_mode_ = decoded.mode;
+          hot_water_frame_bits_ = decoded.frame_bits;
+          hot_water_known_ = true;
+          if (write_state_ == WriteState::kAcked) {
+            const bool same = decoded.mode == requested_mode_;
+            write_state_ = same ? WriteState::kVerified : WriteState::kFailed;
+            if (same) ++stats_.writes_verified;
+            else ++stats_.writes_failed;
+          }
+        } else if (write_state_ == WriteState::kAcked) {
+          write_state_ = WriteState::kFailed;
+          ++stats_.writes_failed;
+        }
+      }
       return true;
     }
     (void)now_ms;
@@ -95,7 +142,18 @@ class ConnectEngine {
     size_t length = 0;
     const ReadTransaction::Action action = transaction_.poll(now_ms, tx.frame, sizeof(tx.frame), length);
     if (action == ReadTransaction::Action::kFailed) {
-      ++stats_.reads_failed;
+      if (writing_) {
+        writing_ = false;
+        write_state_ = WriteState::kFailed;
+        ++stats_.writes_failed;
+      } else {
+        ++stats_.reads_failed;
+        if (write_state_ == WriteState::kAcked) {
+          // The read-back itself failed: the write stays unverified.
+          write_state_ = WriteState::kFailed;
+          ++stats_.writes_failed;
+        }
+      }
       next_id_ = transaction_.next_message_id();
       transaction_.abort();
       return false;
@@ -106,9 +164,17 @@ class ConnectEngine {
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
+      if (writing_) {
+        writing_ = false;
+        write_state_ = WriteState::kNotSent;
+      }
       transaction_.abort();
     } else if (tx.verdict != TxVerdict::kSend) {
       ++stats_.blocked;
+      if (writing_) {
+        writing_ = false;
+        write_state_ = WriteState::kNotSent;
+      }
       transaction_.abort();
     }
     return true;
@@ -123,6 +189,17 @@ class ConnectEngine {
     for (size_t i = 0; i < queue_length_; ++i)
       if (queue_[i] == kind) return;  // already waiting
     if (queue_length_ < kQueue) queue_[queue_length_++] = kind;
+  }
+
+  // The read-back of a write must not wait behind scheduled reads.
+  void enqueue_front_(ReadKind kind) {
+    size_t kept = 0;
+    ReadKind rest[kQueue];
+    for (size_t i = 0; i < queue_length_; ++i)
+      if (queue_[i] != kind) rest[kept++] = queue_[i];
+    queue_[0] = kind;
+    for (size_t i = 0; i < kept && i + 1 < kQueue; ++i) queue_[i + 1] = rest[i];
+    queue_length_ = kept + 1 < kQueue ? kept + 1 : kQueue;
   }
 
   // Scheduled reads: the three temperature slots of each 10-minute cycle, then the hourly ones.
@@ -148,8 +225,17 @@ class ConnectEngine {
   }
 
   bool start_next_(uint32_t now_ms) {
-    // Reads wait for the end of the satellites' window; acknowledgements never do.
-    if (queue_length_ == 0 || in_quiet_window(clock_.seconds(now_ms))) return false;
+    // Reads and writes wait for the end of the satellites' window; acknowledgements never do.
+    if (in_quiet_window(clock_.seconds(now_ms))) return false;
+    // A requested hot-water change goes before any queued read.
+    if (write_state_ == WriteState::kQueued) {
+      transaction_.start_hot_water_write(policy_.self_id, policy_.association, next_id_, requested_mode_,
+                                         hot_water_frame_bits_);
+      writing_ = true;
+      write_state_ = WriteState::kSending;
+      return true;
+    }
+    if (queue_length_ == 0) return false;
     const ReadKind kind = queue_[0];
     for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
     --queue_length_;
@@ -179,6 +265,12 @@ class ConnectEngine {
   ReadKind queue_[kQueue] = {};
   size_t queue_length_ = 0;
   uint8_t next_id_ = 1;
+  bool writing_ = false;
+  WriteState write_state_ = WriteState::kIdle;
+  HotWaterMode requested_mode_ = HotWaterMode::kUnknown;
+  HotWaterMode hot_water_mode_ = HotWaterMode::kUnknown;
+  uint8_t hot_water_frame_bits_ = 0;
+  bool hot_water_known_ = false;
   bool ack_pending_ = false;
   uint8_t relay_[64] = {};
   size_t relay_length_ = 0;
