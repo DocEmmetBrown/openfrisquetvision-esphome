@@ -132,6 +132,8 @@ TEXT_SENSORS = {
     "hot_water_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     # Same states for the last zone 1 setpoint write.
     "zone_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # Zone 1 programme as readable ranges ("Dim 09:30-22:00 | Lun 08:00-21:30 | ...").
+    "zone_program": text_sensor.text_sensor_schema(),
 }
 
 

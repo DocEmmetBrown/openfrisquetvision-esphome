@@ -1,6 +1,6 @@
-# Phase 2c, écriture des consignes de la zone 1 : lectures, accusés de relais, mode ECS et UNE écriture de bloc
-# de zone autorisée (consignes confort / réduit / hors-gel seulement, tx: write, dry_run: false). Le mode et le
-# programme du bloc doivent rester identiques au dernier bloc relayé par la chaudière, sinon la porte refuse.
+# Phase 2c, écriture du bloc de la zone 1 : lectures, accusés de relais, mode ECS et écriture du bloc de zone
+# (consignes, mode, programme ; une demande ne change que son propre champ, tx: write, dry_run: false). La porte refuse
+# tout octet qui différerait du dernier bloc relayé par la chaudière hors du champ demandé.
 # WiFi fourni par l'environnement : OFV_WIFI_SSID / OFV_WIFI_PASSWORD.
 esphome:
   name: frisquette
@@ -79,6 +79,8 @@ frisquet:
     name: Chaudière mode ECS écriture
   zone_write:
     name: Zone 1 écriture consignes
+  zone_program:
+    name: Zone 1 programme (lisible)
   boiler_activity:
     name: Chaudière activité
   reads_ok:
@@ -127,6 +129,14 @@ frisquet:
 select:
   - platform: frisquet
     name: Chaudière mode ECS
+  - platform: frisquet
+    type: zone1_mode
+    name: Zone 1 mode (commande)
+
+text:
+  - platform: frisquet
+    name: Zone 1 programme
+    mode: text
 
 number:
   - platform: frisquet

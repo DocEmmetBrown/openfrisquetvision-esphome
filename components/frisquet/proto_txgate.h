@@ -110,6 +110,17 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
       return TxVerdict::kBlockedAddress;
     if (!(policy.zone_write_mask & kZoneFieldMode) && memcmp(data + 3, zone_reference + 3, 3) != 0)
       return TxVerdict::kBlockedAddress;
+    // The unknown byte is never ours to change.
+    if (data[5] != zone_reference[5]) return TxVerdict::kBlockedAddress;
+    if (memcmp(data + 3, zone_reference + 3, 2) != 0) {
+      // A mode change: the options byte must agree with the mode, keeping the bits we do not own.
+      const uint8_t options = data[4];
+      if ((options & ~0x17) != (zone_reference[4] & ~0x17)) return TxVerdict::kBlockedAddress;
+      const uint8_t owned = options & 0x17;
+      const bool coherent = (data[3] == 0x05 && (owned & 0x14) == 0x04) || (data[3] == 0x06 && owned == 0x01) ||
+                            (data[3] == 0x07 && owned == 0x00) || (data[3] == 0x08 && owned == 0x10);
+      if (!coherent) return TxVerdict::kBlockedAddress;
+    }
     if (!(policy.zone_write_mask & kZoneFieldProgram) && memcmp(data + 6, zone_reference + 6, 42) != 0)
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;

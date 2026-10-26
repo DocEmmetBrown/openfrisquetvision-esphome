@@ -3,6 +3,7 @@
 // (CRC already checked, sync word removed). Field meanings come from the OpenFrisquetVisio
 // reverse engineering; anything not yet confirmed on real traffic is marked "unverified".
 #include <math.h>
+#include <stdio.h>
 
 #include "proto_codec.h"
 
@@ -293,6 +294,64 @@ inline bool decode_hot_water_mode(const uint8_t *frame, size_t length, DecodedHo
     default: out.mode = HotWaterMode::kUnknown;
   }
   return true;
+}
+
+// Weekly programme: 7 days (Sunday first) of 6 bytes, bit set = comfort, bit 0 of byte 0 = 00:00-00:30.
+constexpr size_t kProgramSize = 42;
+
+// "Dim 09:30-22:00 | Lun 08:00-21:30 | ..." (writes `capacity` bytes at most, always terminated).
+inline size_t format_program_ranges(const uint8_t *program, char *out, size_t capacity) {
+  static const char *const days[7] = {"Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"};
+  size_t n = 0;
+  auto put = [&](const char *text) {
+    while (*text && n + 1 < capacity) out[n++] = *text++;
+  };
+  for (int day = 0; day < 7; ++day) {
+    if (day) put(" | ");
+    put(days[day]);
+    bool any = false;
+    int start = -1;
+    for (int slot = 0; slot <= 48; ++slot) {
+      const bool on = slot < 48 && (program[day * 6 + slot / 8] >> (slot % 8)) & 1;
+      if (on && start < 0) start = slot;
+      if (!on && start >= 0) {
+        char range[20];
+        snprintf(range, sizeof(range), " %02d:%02d-%02d:%02d", start / 2, start % 2 * 30, slot / 2,
+                 slot % 2 * 30);
+        put(range);
+        any = true;
+        start = -1;
+      }
+    }
+    if (!any) put(" -");
+  }
+  if (capacity) out[n < capacity ? n : capacity - 1] = '\0';
+  return n;
+}
+
+// 84 hexadecimal characters <-> 42 bytes. Parsing is strict: wrong length or any non-hex character is refused.
+inline bool parse_program_hex(const char *text, size_t length, uint8_t *out) {
+  if (!text || length != kProgramSize * 2) return false;
+  for (size_t i = 0; i < length; ++i) {
+    const char c = text[i];
+    uint8_t v;
+    if (c >= '0' && c <= '9') v = c - '0';
+    else if (c >= 'A' && c <= 'F') v = c - 'A' + 10;
+    else if (c >= 'a' && c <= 'f') v = c - 'a' + 10;
+    else return false;
+    if (i % 2 == 0) out[i / 2] = v << 4;
+    else out[i / 2] |= v;
+  }
+  return true;
+}
+
+inline void format_program_hex(const uint8_t *program, char *out) {
+  static const char digits[] = "0123456789ABCDEF";
+  for (size_t i = 0; i < kProgramSize; ++i) {
+    out[i * 2] = digits[program[i] >> 4];
+    out[i * 2 + 1] = digits[program[i] & 0x0F];
+  }
+  out[kProgramSize * 2] = '\0';
 }
 
 }  // namespace frisquet

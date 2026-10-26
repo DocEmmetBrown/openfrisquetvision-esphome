@@ -134,8 +134,31 @@ bool FrisquetRadio::request_zone_setpoint(uint8_t field, float celsius) {
   return this->engine_.request_zone_setpoints(0, raw[0], raw[1], raw[2]);
 }
 
-void FrisquetRadio::republish_zone_setpoints() {
+void FrisquetRadio::republish_zone_block() {
   for (int &raw : this->last_zone_raw_) raw = -1;
+  this->last_zone_mode_ = -1;
+  this->last_program_.clear();
+}
+
+namespace {
+struct ZoneModeName {
+  const char *name;
+  uint8_t mode;
+};
+// Same labels and order as ZONE_MODES in select.py; mode = byte 3 of the zone block.
+const ZoneModeName ZONE_MODES[] = {{"Auto", 0x05}, {"Confort", 0x06}, {"Réduit", 0x07}, {"Hors Gel", 0x08}};
+}  // namespace
+
+bool FrisquetRadio::request_zone_mode(const std::string &name) {
+  for (const ZoneModeName &entry : ZONE_MODES)
+    if (name == entry.name) return this->engine_.request_zone_mode(0, entry.mode);
+  return false;
+}
+
+bool FrisquetRadio::request_zone_program(const std::string &hex) {
+  uint8_t program[::frisquet::kProgramSize];
+  if (!::frisquet::parse_program_hex(hex.c_str(), hex.size(), program)) return false;
+  return this->engine_.request_zone_program(0, program);
 }
 
 void FrisquetRadio::sync_zone_() {
@@ -154,6 +177,26 @@ void FrisquetRadio::sync_zone_() {
     if (this->zone_numbers_[field] != nullptr)
       this->zone_numbers_[field]->publish_state(::frisquet::temperature8(block[field]));
 #endif
+  }
+  if (block[3] != this->last_zone_mode_) {
+    this->last_zone_mode_ = block[3];
+#ifdef USE_SELECT
+    if (this->zone_mode_select_ != nullptr) {
+      for (const ZoneModeName &entry : ZONE_MODES)
+        if (entry.mode == block[3]) this->zone_mode_select_->publish_state(entry.name);
+    }
+#endif
+  }
+  char hex[::frisquet::kProgramSize * 2 + 1];
+  ::frisquet::format_program_hex(block + 6, hex);
+  if (this->last_program_ != hex) {
+    this->last_program_ = hex;
+#ifdef USE_TEXT
+    if (this->program_text_ != nullptr) this->program_text_->publish_state(hex);
+#endif
+    char ranges[200];
+    ::frisquet::format_program_ranges(block + 6, ranges, sizeof(ranges));
+    this->publish_text_(kZoneProgram, ranges);
   }
 }
 
@@ -183,7 +226,9 @@ void FrisquetRadio::sync_hot_water_() {
 }
 #else
 bool FrisquetRadio::request_zone_setpoint(uint8_t, float) { return false; }
-void FrisquetRadio::republish_zone_setpoints() {}
+void FrisquetRadio::republish_zone_block() {}
+bool FrisquetRadio::request_zone_mode(const std::string &) { return false; }
+bool FrisquetRadio::request_zone_program(const std::string &) { return false; }
 #endif
 
 void FrisquetRadio::setup() {

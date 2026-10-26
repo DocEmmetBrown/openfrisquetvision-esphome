@@ -14,6 +14,9 @@
 #ifdef USE_NUMBER
 #include "esphome/components/number/number.h"
 #endif
+#ifdef USE_TEXT
+#include "esphome/components/text/text.h"
+#endif
 
 #include "proto_crc.h"
 #include "proto_decode.h"
@@ -77,6 +80,7 @@ enum TextId : uint8_t {
   kZoneBlock,
   kHotWaterWrite,
   kZoneWrite,
+  kZoneProgram,
   kTextCount,
 };
 
@@ -110,11 +114,20 @@ class FrisquetRadio : public Component {
   void republish_hot_water_mode();
 #ifdef USE_SELECT
   void set_hot_water_select(select::Select *s) { hot_water_select_ = s; }
+  void set_zone_mode_select(select::Select *s) { zone_mode_select_ = s; }
 #endif
+#ifdef USE_TEXT
+  void set_program_text(text::Text *t) { program_text_ = t; }
+#endif
+
+  // Zone 1 mode ("Auto", "Confort", "Réduit", "Hors Gel") and weekly programme (84 hexadecimal characters).
+  bool request_zone_mode(const std::string &name);
+  bool request_zone_program(const std::string &hex);
+  void republish_zone_block();
+  void republish_zone_setpoints() { this->republish_zone_block(); }
 
   // Zone 1 setpoints: field 0 comfort, 1 reduced, 2 frost. False when the change cannot be queued.
   bool request_zone_setpoint(uint8_t field, float celsius);
-  void republish_zone_setpoints();
 #ifdef USE_NUMBER
   void set_zone_number(uint8_t field, number::Number *n) {
     if (field < 3) zone_numbers_[field] = n;
@@ -178,12 +191,18 @@ class FrisquetRadio : public Component {
   int last_published_mode_{-1};
   ::frisquet::WriteState last_zone_state_{::frisquet::WriteState::kIdle};
   int last_zone_raw_[3]{-1, -1, -1};
+  int last_zone_mode_{-1};
+  std::string last_program_;
 #endif
 #ifdef USE_NUMBER
   number::Number *zone_numbers_[3]{};
 #endif
+#ifdef USE_TEXT
+  text::Text *program_text_{nullptr};
+#endif
 #ifdef USE_SELECT
   select::Select *hot_water_select_{nullptr};
+  select::Select *zone_mode_select_{nullptr};
 #endif
 
   sensor::Sensor *sensors_[kSensorCount]{};

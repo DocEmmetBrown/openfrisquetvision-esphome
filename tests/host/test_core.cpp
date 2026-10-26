@@ -836,6 +836,7 @@ static void test_zone_write() {
   // Only the allowed fields may differ from the known block.
   Bytes other = block;
   other[3] = 0x07;  // mode changed, but only setpoints are allowed
+  other[4] = 0x20;  // reduced: the comfort bit goes
   f = frame_of(other);
   CHECK(evaluate_tx(p, f.data(), f.size(), nullptr, 0, nullptr, reference.data()) == TxVerdict::kBlockedAddress);
   TxPolicy with_mode = p;
@@ -972,6 +973,108 @@ static void test_zone_write() {
     }
   }
   CHECK(judged && low.zone_write_state() == WriteState::kNotSent && !low.reading());
+}
+
+static void test_zone_mode_and_program_write() {
+  using namespace frisquet;
+  const Bytes &known = F["payload_zone_relay_live"];  // mode 05, options 21, comfort 19.0
+  Bytes reference(known.begin() + 15, known.begin() + 15 + kZoneBlockSize);
+  ReadResult result;
+  TxRequest tx;
+  TxPolicy p = engine_policy(TxLevel::kWrite, false);
+  p.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode | kZoneFieldProgram;
+
+  auto make = [&](ConnectEngine &e) {
+    e.set_policy(p);
+    e.set_next_message_id(0x80);
+    e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x54, 0x30);
+    e.on_frame(100, known.data(), known.size(), result);
+  };
+  auto first_write = [&](ConnectEngine &e) {
+    for (uint32_t t = 1000; t < 6000; t += 100)
+      if (e.poll(t, tx) && tx.kind == TxClass::kZoneWrite) return true;
+    return false;
+  };
+
+  // Mode: each choice sets the mode byte and only the owned option bits.
+  struct Case { uint8_t mode, options; } cases[] = {{0x06, 0x01}, {0x07, 0x00}, {0x08, 0x10}};
+  for (const Case &c : cases) {
+    ConnectEngine e;
+    make(e);
+    CHECK(e.request_zone_mode(0, c.mode));
+    CHECK(first_write(e) && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[15 + 3] == c.mode && tx.frame[15 + 4] == (0x20 | c.options));  // 0x20: flag bit kept
+    CHECK(memcmp(tx.frame + 15, reference.data(), 3) == 0 && memcmp(tx.frame + 15 + 5, reference.data() + 5, 43) == 0);
+  }
+  ConnectEngine to_auto;
+  make(to_auto);
+  CHECK(!to_auto.request_zone_mode(0, 0x04) && !to_auto.request_zone_mode(0, 0x09) && !to_auto.request_zone_mode(1, 0x06));
+  CHECK(to_auto.request_zone_mode(0, 0x05));  // already auto: options keep the comfort bit, gets 0x25
+  CHECK(first_write(to_auto) && tx.frame[15 + 3] == 0x05 && tx.frame[15 + 4] == 0x25);
+
+  // Programme: the 42 bytes are replaced, nothing else.
+  uint8_t program[42];
+  memcpy(program, reference.data() + 6, 42);
+  program[8] = 0x00;  // a visible change in Monday's bits
+  ConnectEngine prog;
+  make(prog);
+  CHECK(prog.request_zone_program(0, program));
+  CHECK(first_write(prog) && tx.verdict == TxVerdict::kSend);
+  CHECK(memcmp(tx.frame + 15 + 6, program, 42) == 0 && memcmp(tx.frame + 15, reference.data(), 6) == 0);
+
+  // A request only ever changes its own field, even if the policy would allow more.
+  Bytes crafted = reference;
+  crafted[0] = 0x96;  // setpoint change smuggled into a mode request
+  Bytes frame(kZoneWriteLength);
+  build_zone_write(frame.data(), frame.size(), kIdConnect, 0xE3, 0x90, kIdZone1, crafted.data());
+  TxPolicy only_mode = p;
+  only_mode.zone_write_mask = kZoneFieldMode;
+  CHECK(evaluate_tx(only_mode, frame.data(), frame.size(), nullptr, 0, nullptr, reference.data()) ==
+        TxVerdict::kBlockedAddress);
+
+  // Gate: incoherent mode/options, a foreign option bit and the unknown byte are refused.
+  auto verdict = [&](uint8_t mode, uint8_t options, uint8_t unknown) {
+    Bytes b = reference;
+    b[3] = mode;
+    b[4] = options;
+    b[5] = unknown;
+    build_zone_write(frame.data(), frame.size(), kIdConnect, 0xE3, 0x90, kIdZone1, b.data());
+    return evaluate_tx(p, frame.data(), frame.size(), nullptr, 0, nullptr, reference.data());
+  };
+  CHECK(verdict(0x07, 0x20, 0x00) == TxVerdict::kSend);
+  CHECK(verdict(0x07, 0x21, 0x00) == TxVerdict::kBlockedAddress);  // reduced with the comfort bit
+  CHECK(verdict(0x06, 0x20, 0x00) == TxVerdict::kBlockedAddress);  // comfort without the comfort bit
+  CHECK(verdict(0x08, 0x30, 0x00) == TxVerdict::kSend);
+  CHECK(verdict(0x07, 0x60, 0x00) == TxVerdict::kBlockedAddress);  // boost bit is not ours
+  CHECK(verdict(0x07, 0x20, 0x01) == TxVerdict::kBlockedAddress);  // unknown byte
+  CHECK(verdict(0x05, 0x21, 0x00) == TxVerdict::kSend);            // unchanged block
+}
+
+static void test_program_text() {
+  using namespace frisquet;
+  const Bytes &known = F["payload_zone_relay_live"];
+  const uint8_t *program = known.data() + 15 + 6;
+  char text[160];
+  format_program_ranges(program, text, sizeof(text));
+  CHECK(strcmp(text, "Dim 09:30-22:00 | Lun 08:00-21:30 | Mar 08:00-21:30 | Mer 08:00-21:30 | Jeu 08:00-21:30 | "
+                     "Ven 08:00-21:30 | Sam 09:30-22:00") == 0);
+  char small[10];
+  format_program_ranges(program, small, sizeof(small));
+  CHECK(strlen(small) == 9);
+  uint8_t none[42] = {};
+  none[6] = 0xFF; none[7] = 0xFF; none[8] = 0xFF; none[9] = 0xFF; none[10] = 0xFF; none[11] = 0xFF;  // Monday all day
+  format_program_ranges(none, text, sizeof(text));
+  CHECK(strncmp(text, "Dim - | Lun 00:00-24:00 | Mar -", 31) == 0);
+
+  char hex[85];
+  format_program_hex(program, hex);
+  uint8_t back[42];
+  CHECK(strlen(hex) == 84 && parse_program_hex(hex, 84, back) && memcmp(back, program, 42) == 0);
+  CHECK(parse_program_hex("00", 2, back) == false);
+  hex[10] = 'g';
+  CHECK(!parse_program_hex(hex, 84, back));
+  hex[10] = 'a';
+  CHECK(parse_program_hex(hex, 84, back));
 }
 
 static void test_zone_mode() {
@@ -1217,6 +1320,8 @@ int main() {
   test_hot_water_write_frame_and_gate();
   test_engine_hot_water_write();
   test_zone_write();
+  test_zone_mode_and_program_write();
+  test_program_text();
   test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();

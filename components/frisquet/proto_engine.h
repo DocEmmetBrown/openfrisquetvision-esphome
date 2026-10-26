@@ -88,12 +88,37 @@ class ConnectEngine {
 
   // Ask for a new block for a zone. Refused while a zone write is pending and until the zone's current block
   // is known: every byte not meant to change is copied from it. The gate decides what may really change.
-  bool request_zone_block(uint8_t zone_index, const uint8_t *block) {
+  bool request_zone_block(uint8_t zone_index, const uint8_t *block, uint8_t fields) {
     if (zone_index >= 3 || !zone_known_[zone_index] || zone_write_pending() || !block) return false;
     memcpy(zone_request_, block, kZoneBlockSize);
+    zone_fields_ = fields;
     zone_index_ = zone_index;
     zone_state_ = WriteState::kQueued;
     return true;
+  }
+  // Mode: 0x05 auto, 0x06 comfort, 0x07 reduced, 0x08 frost protection. The options byte follows the MQTT firmware's
+  // Zone::setMode: only bits 0x17 change; in Auto the current comfort bit is kept (the satellite recomputes it).
+  bool request_zone_mode(uint8_t zone_index, uint8_t mode) {
+    if (zone_index >= 3 || !zone_known_[zone_index] || mode < 0x05 || mode > 0x08) return false;
+    uint8_t block[kZoneBlockSize];
+    memcpy(block, zone_block_[zone_index], kZoneBlockSize);
+    uint8_t owned = 0;
+    switch (mode) {
+      case 0x05: owned = 0x04 | (block[4] & 0x01); break;
+      case 0x06: owned = 0x01; break;
+      case 0x07: owned = 0x00; break;
+      default: owned = 0x10; break;
+    }
+    block[3] = mode;
+    block[4] = static_cast<uint8_t>((block[4] & ~0x17) | owned);
+    return request_zone_block(zone_index, block, kZoneFieldMode);
+  }
+  bool request_zone_program(uint8_t zone_index, const uint8_t *program) {
+    if (zone_index >= 3 || !zone_known_[zone_index] || !program) return false;
+    uint8_t block[kZoneBlockSize];
+    memcpy(block, zone_block_[zone_index], kZoneBlockSize);
+    memcpy(block + 6, program, 42);
+    return request_zone_block(zone_index, block, kZoneFieldProgram);
   }
   bool request_zone_setpoints(uint8_t zone_index, uint8_t comfort_raw, uint8_t reduced_raw, uint8_t frost_raw) {
     if (zone_index >= 3 || !zone_known_[zone_index]) return false;
@@ -102,7 +127,7 @@ class ConnectEngine {
     block[0] = comfort_raw;
     block[1] = reduced_raw;
     block[2] = frost_raw;
-    return request_zone_block(zone_index, block);
+    return request_zone_block(zone_index, block, kZoneFieldSetpoints);
   }
 
   // Every validated frame. Returns true when it completes the running read.
@@ -214,7 +239,10 @@ class ConnectEngine {
     }
     if (action != ReadTransaction::Action::kSend) return false;
     tx.length = length;
-    tx.verdict = evaluate_tx(policy_, tx.frame, tx.length, nullptr, 0, &tx.kind,
+    // A zone write may only change the fields it was requested for, whatever the policy would allow.
+    TxPolicy gate = policy_;
+    if (zone_writing_) gate.zone_write_mask &= zone_fields_;
+    tx.verdict = evaluate_tx(gate, tx.frame, tx.length, nullptr, 0, &tx.kind,
                              zone_writing_ && zone_known_[zone_index_] ? zone_block_[zone_index_] : nullptr);
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
@@ -372,6 +400,7 @@ class ConnectEngine {
   bool zone_known_[3] = {};
   uint8_t zone_request_[kZoneBlockSize] = {};
   uint8_t zone_index_ = 0;
+  uint8_t zone_fields_ = 0;
   uint8_t zone_first_id_ = 0;
   bool zone_writing_ = false;
   WriteState zone_state_ = WriteState::kIdle;

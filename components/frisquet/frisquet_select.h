@@ -11,15 +11,18 @@
 namespace esphome {
 namespace frisquet_radio {
 
-// Hot-water (ECS) mode. Writing it needs `tx: write`; without it the select only shows the mode.
-class HotWaterSelect : public select::Select, public Component {
+// Writable selects. Writing needs `tx: write`; without it they only show what the boiler reports.
+class FrisquetSelect : public select::Select, public Component {
  public:
+  enum Kind : uint8_t { kHotWater, kZone1Mode };
   void set_parent(FrisquetRadio *parent) { parent_ = parent; }
+  void set_kind(Kind kind) { kind_ = kind; }
   void dump_config() override;
 
  protected:
   void control(const std::string &value) override;
   FrisquetRadio *parent_{nullptr};
+  Kind kind_{kHotWater};
 };
 
 }  // namespace frisquet_radio
