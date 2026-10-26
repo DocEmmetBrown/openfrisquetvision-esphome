@@ -323,6 +323,19 @@ Conséquences :
 - Mémoire stable (264 Ko libres), boucle ≈ 22 ms, aucune anomalie chaudière avant, pendant et après (retour du firmware MQTT à 12:50).
 - Les accusés de relais n'étaient pas autorisés (niveau `read`) et aucun relais ne s'est produit pendant la fenêtre.
 
+### 10.6 Fenêtre de lectures et d'accusés réels du 26/10/2026 (12:57 – 13:20, `tx: ack`, `dry_run: false`)
+
+Le firmware ESPHome a tenu seul le rôle minimal d'un Connect pendant ~24 minutes (lectures + accusés de relais, aucune écriture) :
+
+- **2 relais de zone, 2 accusés émis** (≈ 10 à 16 ms après chaque relais), **2 confirmations du satellite** (`08 80 FA <id> FE …`), exactement la séquence
+  de l'ancien firmware. Un seul relais par changement : plus de répétitions toutes les ~4 s comme sans accusé.
+- Changements provoqués : Réduit permanent (bloc mode `07`, options `00`), puis retour en Auto (mode `05`, options `21`).
+- **14 lectures émises, 14 réponses, 0 échec, 0 trame bloquée**, aucun avertissement hormis celui, voulu, de la transmission réelle.
+- Programme hebdomadaire inchangé avant/après ; anomalie chaudière absente avant, pendant et après (retour du firmware MQTT à 13:20).
+
+Reste à faire pour que le firmware ESPHome remplace le firmware MQTT : les **écritures** (mode ECS, consignes, bloc de zone, programme),
+l'association, les satellites virtuels et la sonde extérieure, et la persistance des identifiants (association, NetworkID, id de message).
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
