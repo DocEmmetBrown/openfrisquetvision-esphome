@@ -14,6 +14,8 @@
 #include "../../components/frisquet/proto_crc.h"
 #include "../../components/frisquet/proto_decode.h"
 #include "../../components/frisquet/proto_schedule.h"
+#include "../../components/frisquet/proto_transaction.h"
+#include "../../components/frisquet/proto_txgate.h"
 #include "../../components/frisquet/proto_tracker.h"
 
 #ifndef FIXTURES
@@ -189,6 +191,173 @@ static void test_zone_block_and_fault_broadcast() {
   CHECK(st.fault && st.running && !st.heating_stopped);
   CHECK_NEAR(b.ambient[0], 18.9f, 0.001f);
   CHECK_NEAR(b.setpoint[0], 19.0f, 0.001f);
+}
+
+static void test_builders_match_real_frames() {
+  using namespace frisquet;
+  uint8_t out[64];
+  struct Case { const char *name; uint8_t id; uint16_t address; uint16_t words; };
+  const Case cases[] = {
+      {"payload_79f2_request", 0x86, 0x79F2, 0x1C},
+      {"payload_7a18_request", 0x1A, 0x7A18, 0x1C},
+      {"payload_a063_request", 0x8D, 0xA063, 0x18},
+      {"payload_a0fc_request", 0x1D, 0xA0FC, 0x01},
+  };
+  for (const Case &c : cases) {
+    const Bytes &expected = F[c.name];
+    const size_t n = build_read_request(out, sizeof(out), kIdConnect, 0xE3, c.id, c.address, c.words);
+    CHECK(n == expected.size());
+    CHECK(n == expected.size() && memcmp(out, expected.data(), n) == 0);
+  }
+  CHECK(build_read_request(out, 9, kIdConnect, 0xE3, 1, 0x79F2, 0x1C) == 0);
+
+  // The acknowledgement of the relayed zone block is the exact echo the MQTT firmware sent.
+  const Bytes &relay = F["payload_zone_block"];
+  const Bytes &ack = F["payload_zone_ack"];
+  CHECK(ack.size() == kZoneAckLength);
+  CHECK(is_zone_relay(relay.data(), relay.size(), kIdConnect));
+  const size_t n = build_zone_ack(relay.data(), relay.size(), kIdConnect, out, sizeof(out));
+  CHECK(n == ack.size());
+  CHECK(n == ack.size() && memcmp(out, ack.data(), n) == 0);
+
+  // Not acknowledged: wrong addressee, an acknowledgement itself, a broadcast, a short buffer.
+  CHECK(build_zone_ack(relay.data(), relay.size(), 0x55, out, sizeof(out)) == 0);
+  CHECK(build_zone_ack(ack.data(), ack.size(), kIdConnect, out, sizeof(out)) == 0);
+  const Bytes &broadcast = F["payload_sat_broadcast"];
+  CHECK(build_zone_ack(broadcast.data(), broadcast.size(), kIdConnect, out, sizeof(out)) == 0);
+  CHECK(build_zone_ack(relay.data(), relay.size(), kIdConnect, out, 54) == 0);
+  Bytes not_zone = relay;
+  not_zone[11] = 0x55;
+  CHECK(!is_zone_relay(not_zone.data(), not_zone.size(), kIdConnect));
+}
+
+static void test_tx_gate() {
+  using namespace frisquet;
+  const Bytes &req = F["payload_79f2_request"];
+  const Bytes &relay = F["payload_zone_block"];
+  const Bytes &ack = F["payload_zone_ack"];
+  TxPolicy p;
+  p.association = 0xE3;
+  TxClass cls = TxClass::kUnknown;
+
+  // Default policy: nothing leaves.
+  CHECK(evaluate_tx(p, req.data(), req.size(), nullptr, 0, &cls) == TxVerdict::kBlockedLevel);
+  CHECK(cls == TxClass::kReadRequest);
+
+  p.level = TxLevel::kRead;
+  CHECK(evaluate_tx(p, req.data(), req.size()) == TxVerdict::kDryRun);
+  p.dry_run = false;
+  CHECK(evaluate_tx(p, req.data(), req.size()) == TxVerdict::kSend);
+  // A read level does not allow the acknowledgement.
+  CHECK(evaluate_tx(p, ack.data(), ack.size(), relay.data(), relay.size(), &cls) == TxVerdict::kBlockedLevel);
+  CHECK(cls == TxClass::kZoneAck);
+  p.level = TxLevel::kAck;
+  CHECK(evaluate_tx(p, ack.data(), ack.size(), relay.data(), relay.size()) == TxVerdict::kSend);
+  CHECK(evaluate_tx(p, req.data(), req.size()) == TxVerdict::kSend);
+
+  // The acknowledgement needs the relay it answers, and must be its exact echo.
+  CHECK(evaluate_tx(p, ack.data(), ack.size()) == TxVerdict::kBlockedAddress);
+  Bytes tampered = ack;
+  tampered[20] ^= 0x01;  // a different setpoint than the relayed block
+  CHECK(evaluate_tx(p, tampered.data(), tampered.size(), relay.data(), relay.size()) == TxVerdict::kBlockedAddress);
+
+  // Kill switch overrides everything.
+  p.kill_switch = true;
+  CHECK(evaluate_tx(p, req.data(), req.size()) == TxVerdict::kBlockedKillSwitch);
+  p.kill_switch = false;
+
+  // Identity: not associated, wrong association, wrong sender.
+  TxPolicy unassociated = p;
+  unassociated.association = 0xFF;
+  CHECK(evaluate_tx(unassociated, req.data(), req.size()) == TxVerdict::kBlockedIdentity);
+  TxPolicy other = p;
+  other.association = 0x11;
+  CHECK(evaluate_tx(other, req.data(), req.size()) == TxVerdict::kBlockedIdentity);
+  TxPolicy not_connect = p;
+  not_connect.self_id = 0x08;
+  CHECK(evaluate_tx(not_connect, req.data(), req.size()) == TxVerdict::kBlockedIdentity);
+
+  // Reads outside the whitelist or too large are refused, whatever the level.
+  uint8_t frame[10];
+  build_read_request(frame, sizeof(frame), kIdConnect, 0xE3, 1, 0xA154, 0x18);  // the zone block
+  CHECK(evaluate_tx(p, frame, sizeof(frame)) == TxVerdict::kBlockedAddress);
+  build_read_request(frame, sizeof(frame), kIdConnect, 0xE3, 1, 0x79F2, 0x41);
+  CHECK(evaluate_tx(p, frame, sizeof(frame)) == TxVerdict::kBlockedAddress);
+  build_read_request(frame, sizeof(frame), kIdConnect, 0xE3, 1, 0x79F2, 0);
+  CHECK(evaluate_tx(p, frame, sizeof(frame)) == TxVerdict::kBlockedAddress);
+
+  // Anything else, even at the highest level: association frames, zone writes, other types.
+  p.level = TxLevel::kWrite;
+  const Bytes assoc = {0x7E, 0x80, 0xE3, 0x01, 0x01, 0x41, 0x00};
+  CHECK(evaluate_tx(p, assoc.data(), assoc.size()) == TxVerdict::kBlockedUnknownFrame);
+  Bytes zone_write = relay;
+  zone_write[0] = kIdBoiler;
+  zone_write[1] = kIdConnect;
+  zone_write[4] = 0x08;  // a write, not an acknowledgement
+  CHECK(evaluate_tx(p, zone_write.data(), zone_write.size()) == TxVerdict::kBlockedUnknownFrame);
+  CHECK(evaluate_tx(p, req.data(), 9) == TxVerdict::kMalformed);
+  CHECK(evaluate_tx(p, nullptr, 0) == TxVerdict::kMalformed);
+}
+
+static void test_read_transaction() {
+  using namespace frisquet;
+  uint8_t frame[64];
+  size_t length = 0;
+  const Bytes &answer = F["payload_79f2_idle"];  // id 0x86, association 0xE3
+
+  // Answer after the third transmission.
+  ReadTransaction t;
+  t.start(kIdConnect, 0xE3, 0x86, 0x79F2, 0x1C);
+  CHECK(t.active());
+  CHECK(t.poll(1000, frame, sizeof(frame), length) == ReadTransaction::Action::kSend);
+  CHECK(length == 10 && frame[3] == 0x86 && be16(frame + 6) == 0x79F2);
+  CHECK(t.poll(1100, frame, sizeof(frame), length) == ReadTransaction::Action::kNone);
+  CHECK(t.poll(3200, frame, sizeof(frame), length) == ReadTransaction::Action::kSend);
+  CHECK(t.poll(5400, frame, sizeof(frame), length) == ReadTransaction::Action::kSend);
+  // Wrong id and wrong reception are ignored.
+  Bytes wrong_id = answer;
+  wrong_id[3] = 0x87;
+  CHECK(!t.on_frame(wrong_id.data(), wrong_id.size()));
+  Bytes not_ack = answer;
+  not_ack[4] = 0x01;
+  CHECK(!t.on_frame(not_ack.data(), not_ack.size()));
+  CHECK(t.on_frame(answer.data(), answer.size()));
+  CHECK(t.done() && !t.active());
+  CHECK(t.answer_length() == answer.size() && memcmp(t.answer(), answer.data(), answer.size()) == 0);
+  CHECK(t.poll(9000, frame, sizeof(frame), length) == ReadTransaction::Action::kNone);
+
+  // No answer: five sends under id 0x0A, five under 0x0B, failure 22 s after the start.
+  // (Measured on the air: 13:48:00 to 13:48:22 with ids 0A then 0B.)
+  ReadTransaction f;
+  f.start(kIdConnect, 0xE3, 0x0A, 0x79F2, 0x1C);
+  const uint32_t t0 = 50000;
+  int sends_a = 0, sends_b = 0;
+  bool failed = false;
+  uint32_t failed_at = 0;
+  for (uint32_t now = t0; now <= t0 + 30000 && !failed; now += 100) {
+    const ReadTransaction::Action action = f.poll(now, frame, sizeof(frame), length);
+    if (action == ReadTransaction::Action::kSend) {
+      if (frame[3] == 0x0A) ++sends_a;
+      else if (frame[3] == 0x0B) ++sends_b;
+    } else if (action == ReadTransaction::Action::kFailed) {
+      failed = true;
+      failed_at = now - t0;
+    }
+  }
+  CHECK(sends_a == 5 && sends_b == 5);
+  CHECK(failed);
+  CHECK(failed_at == 22000);
+  CHECK(f.failed());
+  CHECK(!f.on_frame(answer.data(), answer.size()));
+
+  // An answer to the second attempt (id 0x0B) is accepted.
+  ReadTransaction g;
+  g.start(kIdConnect, 0xE3, 0x0A, 0x79F2, 0x1C);
+  for (uint32_t now = 0; now <= 11000; now += 100) g.poll(now, frame, sizeof(frame), length);
+  CHECK(g.message_id() == 0x0B);
+  Bytes late = answer;
+  late[3] = 0x0B;
+  CHECK(g.on_frame(late.data(), late.size()));
 }
 
 static void test_zone_mode() {
@@ -404,6 +573,9 @@ int main() {
   test_boiler_info_rejects_wrong_frames();
   test_satellite_broadcast();
   test_zone_mode();
+  test_builders_match_real_frames();
+  test_tx_gate();
+  test_read_transaction();
   test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();

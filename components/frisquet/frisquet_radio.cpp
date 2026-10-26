@@ -201,6 +201,11 @@ void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
       this->last_zone_block_ = text;
       this->publish_text_(kZoneBlock, text);
     }
+    // Dry run: show the acknowledgement a Connect would send. Nothing is transmitted.
+    uint8_t ack[::frisquet::kZoneAckLength];
+    if (::frisquet::build_zone_ack(payload, length, ::frisquet::kIdConnect, ack, sizeof(ack)) > 0) {
+      ESP_LOGD(TAG, "DRY-RUN ack (not sent) id=%02X: %s", payload[3], format_hex_pretty(ack, sizeof(ack)).c_str());
+    }
     return;
   }
 

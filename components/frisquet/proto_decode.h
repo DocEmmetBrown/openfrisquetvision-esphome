@@ -198,7 +198,7 @@ inline bool decode_zone_block(const uint8_t *frame, size_t length, ZoneBlock &ou
   Header header;
   if (!parse_header(frame, length, header) || header.type != kInit) return false;
   if (length != kZoneBlockLength) return false;
-  if (frame[6] != 0xA1 || frame[7] != 0x54 || frame[10] != 0xA1 || frame[11] != 0x54 || frame[14] != 0x30)
+  if (frame[10] != 0xA1 || frame[11] != 0x54 || frame[12] != 0x00 || frame[13] != 0x18 || frame[14] != 0x30)
     return false;
   out.comfort = temperature8(frame[15]);
   out.reduced = temperature8(frame[16]);

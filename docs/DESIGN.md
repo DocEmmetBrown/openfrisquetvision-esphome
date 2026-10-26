@@ -295,7 +295,11 @@ Conséquences :
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
-1. Option de compilation `frisquet: tx: none | read | write` ; `none` ne compile **aucun** chemin d'émission (phases R à 1).
+1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun** chemin d'émission (phases R à 1) ;
+   `read` n'autorise que les lectures de la liste blanche ; `ack` ajoute l'accusé des relais de zone (écho exact du bloc relayé, vérifié
+   octet par octet avant envoi) ; `write` est réservé (aucune écriture n'est reconnue tant que sa liste blanche n'existe pas).
+   La porte `evaluate_tx()` (`proto_txgate.h`) refuse tout ce qui n'est pas reconnu : identité (émetteur, association), liste d'adresses,
+   taille, interrupteur d'arrêt, niveau, dry-run.
 2. **Liste blanche** d'adresses par palier (2a : lectures ; 2b : `A0FC` ; 2c : bloc de zone).
 3. **Dry-run** : journalise la trame qui serait envoyée, à comparer aux trames du firmware MQTT avant activation.
 4. **Interrupteur d'arrêt d'urgence** dans HA, forcé à l'arrêt après un redémarrage anormal.

@@ -10,6 +10,7 @@
 
 #include "proto_crc.h"
 #include "proto_decode.h"
+#include "proto_encode.h"
 #include "proto_tracker.h"
 
 namespace esphome {
