@@ -37,6 +37,10 @@ payload_zone_ack = 80 7E E3 C4 88 17 30 96 78 1E 05 25 00 00 00 F8 FF FF 0F 00 0
 payload_zone_relay_live = 7E 80 E3 64 08 17 A1 54 00 15 A1 54 00 18 30 8C 78 1E 05 21 00 00 00 F8 FF FF 0F 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 F8 FF FF 0F
 payload_zone_ack_live = 80 7E E3 64 88 17 30 8C 78 1E 05 21 00 00 00 F8 FF FF 0F 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 F8 FF FF 0F
 
+# Real ECS-mode write captured from the MQTT firmware on 2026-10-26 14:23 (Eco Horaires -> Eco), and the boiler's reply
+payload_a0fc_write_eco = 80 7E E3 1C 01 17 A0 FC 00 01 A0 FC 00 01 02 00 88
+payload_a0fc_write_eco_reply = 7E 80 E3 1C 81 17 02 00 88
+
 # 0x7A18 consumption (both counters 0 on this boiler)
 payload_7a18 = 7E 80 E3 1A 81 03 38 00 01 4B 08 14 3C 4B 0F 14 50 4B 0F 14 50 07 13 00 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 08 27 00 FF 7E FF FF
 

@@ -608,7 +608,16 @@ static void test_engine_schedule_and_failure() {
 static void test_hot_water_write_frame_and_gate() {
   using namespace frisquet;
   uint8_t out[32];
-  // Derived from the MQTT firmware's envoyerModeECS(): not yet captured live (see PROTOCOL.md).
+  // Derived from the MQTT firmware's envoyerModeECS(), and confirmed against a real capture (2026-10-26 14:23).
+  const Bytes &real_write = F["payload_a0fc_write_eco"];
+  CHECK(real_write.size() == kHotWaterModeWriteLength);
+  const size_t n_real = build_hot_water_mode_write(out, sizeof(out), kIdConnect, 0xE3, 0x1C, HotWaterMode::kEco, 0x80);
+  CHECK(n_real == real_write.size() && memcmp(out, real_write.data(), n_real) == 0);
+  TxPolicy real_policy;
+  real_policy.level = TxLevel::kWrite;
+  real_policy.dry_run = false;
+  real_policy.association = 0xE3;
+  CHECK(evaluate_tx(real_policy, real_write.data(), real_write.size()) == TxVerdict::kSend);
   const size_t n = build_hot_water_mode_write(out, sizeof(out), kIdConnect, 0xE3, 0x8A, HotWaterMode::kEco, 0x80);
   const uint8_t expected[17] = {0x80, 0x7E, 0xE3, 0x8A, 0x01, 0x17, 0xA0, 0xFC, 0x00,
                                 0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00, 0x88};
@@ -701,8 +710,8 @@ static void test_engine_hot_water_write() {
   CHECK(tx.frame[3] == 0x8A && tx.frame[16] == 0x88);
   CHECK(e.write_state() == WriteState::kSending);
   const uint8_t write_id = tx.frame[3];
-  // The boiler's INIT acknowledgement (content not captured yet: the exchange matters, not the data).
-  const Bytes init_ack = {0x7E, 0x80, 0xE3, write_id, 0x81, 0x17, 0x02, 0x00, 0x88};
+  // The boiler's INIT acknowledgement, as captured on the air: it carries the new value (00 88) back.
+  const Bytes init_ack = with_id(F["payload_a0fc_write_eco_reply"], write_id);
   CHECK(!e.on_frame(now + 100, init_ack.data(), init_ack.size(), result));
   CHECK(e.write_state() == WriteState::kAcked);
   CHECK(e.stats().writes_acked == 1);
