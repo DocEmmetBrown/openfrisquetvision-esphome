@@ -288,7 +288,8 @@ void FrisquetRadio::setup() {
   policy.kill_switch = this->killed_;
   policy.self_id = ::frisquet::kIdConnect;
   policy.association = this->association_;
-  if (this->tx_level_ >= 3) policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints;
+  if (this->tx_level_ >= 3)
+    policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints | ::frisquet::kZoneFieldMode | ::frisquet::kZoneFieldProgram;
   this->engine_.set_policy(policy);
   this->engine_.set_next_message_id(static_cast<uint8_t>(random_uint32() & 0xFF));
   this->engine_.request_initial_reads();
@@ -613,7 +614,7 @@ void FrisquetRadio::dump_config() {
   if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
 #ifdef FRISQUET_TX_ENABLED
   ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s",
-                this->tx_level_ >= 3 ? "reads + zone acks + hot-water mode and zone 1 setpoint writes"
+                this->tx_level_ >= 3 ? "reads + zone acks + hot-water mode and zone 1 setpoint, mode and programme writes"
                 : this->tx_level_ >= 2 ? "reads + zone acks"
                                        : "reads only",
                 this->association_, this->dry_run_ ? "DRY RUN (nothing is transmitted)" : "LIVE");

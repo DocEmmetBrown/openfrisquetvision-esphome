@@ -7,7 +7,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.4.0-phase-2c-zone"
+    version: "0.5.0-phase-2c-zone"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
