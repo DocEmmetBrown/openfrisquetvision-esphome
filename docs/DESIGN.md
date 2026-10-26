@@ -336,6 +336,18 @@ Le firmware ESPHome a tenu seul le rôle minimal d'un Connect pendant ~24 minute
 Reste à faire pour que le firmware ESPHome remplace le firmware MQTT : les **écritures** (mode ECS, consignes, bloc de zone, programme),
 l'association, les satellites virtuels et la sonde extérieure, et la persistance des identifiants (association, NetworkID, id de message).
 
+### 10.7 Fenêtre d'écriture du mode ECS du 26/10/2026 (14:47 – 14:58, `tx: write`, `dry_run: false`)
+
+Première **écriture** émise par le firmware ESPHome, depuis le sélecteur « Chaudière mode ECS » :
+
+- **Eco Horaires → Eco** (14:52:28) : trame émise `80 7E E3 EE 01 17 A0 FC 00 01 A0 FC 00 01 02 00 88`, accusé de la chaudière 250 ms plus tard
+  (`7E 80 E3 EE 81 17 02 00 88`, identique au format capturé), relecture de `A0FC` = `00 88` → état **verified** à 14:52:29.
+  L'écriture a attendu la fin de la fenêtre silencieuse (demandée à 14:50:58, émise à 14:52:28).
+- **Retour à Eco Horaires** (≈ 14:55) : sélecteur et relecture à « Eco Horaires », état « verified » ; la chaudière vue par le firmware MQTT
+  après le retour : mode ECS « Eco Horaires », aucune anomalie.
+- 9 lectures réussies, 0 échec, 0 trame bloquée, aucun avertissement hormis celui de la transmission réelle.
+- La seconde écriture est antérieure au début de la capture des journaux : elle est établie par l'état final (sélecteur, relecture, tableau de bord MQTT).
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
