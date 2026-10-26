@@ -309,6 +309,20 @@ Conséquences :
 - **Pas encore comparé** : un accusé réel de l'ancien firmware pour un relais du même moment (aucun relais ne s'est produit après le retour).
   L'égalité octet par octet est vérifiée sur la paire réelle du 25/10 (test hôte).
 
+### 10.5 Fenêtre de lectures réelles du 26/10/2026 (12:35 – 12:51, `tx: read`, `dry_run: false`)
+
+**Première émission réelle du firmware ESPHome** : 8 lectures émises, 8 réponses de la chaudière (≈ 130 ms), 0 échec, 0 trame bloquée.
+
+- Lectures de démarrage (`79F2`, `7A18`, `A063`, `A0FC`) à 12:37:57, après la fenêtre silencieuse, toutes répondues du premier coup.
+- Créneaux horaires de la chaudière ensuite : 12:42:58, 12:45:58 et 12:47:58 (`:03`, `:06`, `:08` à ≈ 2 s près de l'horloge de la chaudière),
+  ce qui confirme le correctif de réinitialisation des gardes.
+- Valeurs identiques à celles de l'ancien firmware relevées avant et après la fenêtre : ECS, corps de chauffe, pression, départ, consigne de départ,
+  mode ECS (Eco Horaires), consigne et ambiante de la zone 1 (après le retour, l'ancien firmware lisait exactement 26,5 / 76,2 / 1,42 / 56,5 / 19,8
+  que la dernière lecture ESPHome). La fumée à 108,1 °C pendant un chauffage ECS confirme que ce capteur est alimenté brûleur allumé.
+- 3 trames réparées par le CRC logiciel pendant la fenêtre (réparation en situation réelle).
+- Mémoire stable (264 Ko libres), boucle ≈ 22 ms, aucune anomalie chaudière avant, pendant et après (retour du firmware MQTT à 12:50).
+- Les accusés de relais n'étaient pas autorisés (niveau `read`) et aucun relais ne s'est produit pendant la fenêtre.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
