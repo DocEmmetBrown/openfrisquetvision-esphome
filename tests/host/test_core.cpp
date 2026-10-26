@@ -618,6 +618,15 @@ static void test_hot_water_write_frame_and_gate() {
   real_policy.dry_run = false;
   real_policy.association = 0xE3;
   CHECK(evaluate_tx(real_policy, real_write.data(), real_write.size()) == TxVerdict::kSend);
+  // The way back: Eco Horaires, mode byte 0x90 (frame bit 0x80 preserved).
+  const Bytes &real_back = F["payload_a0fc_write_eco_scheduled"];
+  const size_t n_back =
+      build_hot_water_mode_write(out, sizeof(out), kIdConnect, 0xE3, 0x1D, HotWaterMode::kEcoScheduled, 0x80);
+  CHECK(n_back == real_back.size() && memcmp(out, real_back.data(), n_back) == 0);
+  CHECK(evaluate_tx(real_policy, real_back.data(), real_back.size()) == TxVerdict::kSend);
+  // The boiler's reply repeats the written value: the read-back and the reply agree.
+  const Bytes &reply_back = F["payload_a0fc_write_eco_scheduled_reply"];
+  CHECK(reply_back.size() == 9 && reply_back[8] == real_back[16] && reply_back[3] == real_back[3]);
   const size_t n = build_hot_water_mode_write(out, sizeof(out), kIdConnect, 0xE3, 0x8A, HotWaterMode::kEco, 0x80);
   const uint8_t expected[17] = {0x80, 0x7E, 0xE3, 0x8A, 0x01, 0x17, 0xA0, 0xFC, 0x00,
                                 0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00, 0x88};
