@@ -374,6 +374,19 @@ Première écriture d'un **bloc de zone** émise par le firmware ESPHome (nombre
 - La lecture `79F2` a affiché l'ancienne consigne (20,5) jusqu'à ~2 min après, puis 20,0 : elle est retardée, pas fausse.
 - 18 émissions de bloc, 0 trame bloquée. Retour au firmware MQTT à 16:13 : aucune anomalie, programme identique à la sauvegarde.
 
+### 10.10 Fenêtre d'écriture du mode et du programme de la zone 1 du 26/10/2026 (17:26 – 18:27, `tx: write`, `dry_run: false`)
+
+- **Défaut trouvé en direct** : une édition de source perdue (course entre outils) laissait le masque de la politique sur « consignes seules » ;
+  la porte a donc refusé (`BLOCKED_ADDRESS`, rien émis) la première demande de mode, ce qui est le comportement voulu. Corrigé, reflashé.
+  Rappel : après chaque redémarrage le bloc est inconnu jusqu'au prochain relais (action sur le satellite) ; la persistance reste à faire.
+- **Mode** : Auto → Réduit demandé à 17:46:28, accepté par le satellite au créneau `:x4:37` (17:54:37, écho `verified`, satellite « Réduit »).
+  Réduit → Auto demandé à 17:55:06, accepté à 18:04:37 (`verified`, satellite « Auto (confort) »). Le satellite n'accepte qu'à son créneau
+  (`:x4:37` sur cette installation, toutes les 10 min), les rafales de 40 s en attendant.
+- **Programme** : lundi 08:00-21:30 → 08:00-22:00 demandé à 18:08:49 ; l'utilisateur a constaté sur le satellite « 22:00 » : écriture acceptée.
+  Non observé par les journaux : le flux de logs s'est arrêté à 18:10 et la carte a redémarré vers 18:25 (« Reboot request from api », sans
+  commande de notre part ; à surveiller). Retour au firmware MQTT à 18:26 : aucune anomalie, ECS inchangé.
+- Le firmware MQTT ne connaît pas ce nouveau programme avant un prochain relais.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
