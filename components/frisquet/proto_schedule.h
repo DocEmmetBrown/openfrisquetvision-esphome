@@ -31,6 +31,12 @@ class SlotSchedule {
     return true;
   }
 
+  // Forget past attempts, e.g. when the clock switches from uptime to the boiler's date.
+  void reset() {
+    attempted_ = false;
+    last_attempt_ms_ = 0;
+  }
+
  private:
   bool attempted_ = false;
   uint32_t last_attempt_ms_ = 0;

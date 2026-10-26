@@ -127,6 +127,14 @@ class ConnectEngine {
 
   // Scheduled reads: the three temperature slots of each 10-minute cycle, then the hourly ones.
   void schedule_(uint32_t now_ms) {
+    // The first boiler date replaces the uptime clock: attempts made in the old time base must not
+    // block the slots of the new one (seen in the 2026-10-26 dry run: :03 and :06 were skipped).
+    if (clock_.known() && !clock_was_known_) {
+      clock_was_known_ = true;
+      for (SlotSchedule &slot : temperature_slots_) slot.reset();
+      consumption_slot_.reset();
+      hot_water_slot_.reset();
+    }
     const uint32_t seconds = clock_.seconds(now_ms);
     for (size_t i = 0; i < 3; ++i)
       if (temperature_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kTemperatureOffsets[i]))
@@ -161,6 +169,7 @@ class ConnectEngine {
 
   TxPolicy policy_;
   BoilerClock clock_;
+  bool clock_was_known_ = false;
   EngineStats stats_;
   ReadTransaction transaction_;
   ReadKind current_kind_ = ReadKind::kUnknown;

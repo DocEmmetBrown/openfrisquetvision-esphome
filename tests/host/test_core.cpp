@@ -547,6 +547,19 @@ static void test_engine_schedule_and_failure() {
   CHECK(!h.poll(5200, tx));
   CHECK(h.poll(125000, tx) && be16(tx.frame + 6) == 0xA0FC);  // 18:07:00
 
+  // The clock switches from uptime to the boiler's date after a first attempt: the slots of the new
+  // time base must still fire (regression from the dry run: :03 and :06 were skipped after the sync).
+  ConnectEngine u;
+  u.set_policy(engine_policy(TxLevel::kRead, true));
+  CHECK(!u.poll(100000, tx));
+  CHECK(u.poll(180000, tx) && be16(tx.frame + 6) == 0x79F2);  // uptime-based :03 slot, 180 s after boot
+  // The first broadcast arrives at 200 s: boiler time 12:12:30, so the :03 slot is 30 s away.
+  u.clock().set_from_bcd(200000, 0x26, 0x10, 0x26, 0x12, 0x12, 0x30);
+  CHECK(!u.poll(229000, tx));
+  CHECK(u.poll(230000, tx) && be16(tx.frame + 6) == 0x79F2);  // 12:13:00
+  CHECK(u.poll(410000, tx) && be16(tx.frame + 6) == 0x79F2);  // 12:16:00 (:06)
+  CHECK(u.poll(530000, tx) && be16(tx.frame + 6) == 0x79F2);  // 12:18:00 (:08)
+
   // No answer: two attempts, 10 sends, the failure is counted and the id moves on by two.
   ConnectEngine f;
   f.set_policy(engine_policy(TxLevel::kRead, false));

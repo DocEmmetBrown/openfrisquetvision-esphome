@@ -295,6 +295,20 @@ Conséquences :
 - tout essai ESPHome sur la carte unique est précédé d'un plan de retour (OTA du firmware MQTT, prouvé en 12 s) ;
 - les diagnostics « octets bruts » et « dernier bloc de configuration » sont conservés pour analyser les modes dans l'historique HA.
 
+### 10.4 Fenêtre dry-run du 26/10/2026 (12:03 – 12:27, carte unique, `tx: ack`, `dry_run: true`)
+
+- **Aucune trame émise** : 12 lectures et 10 accusés journalisés `TX DRY_RUN`, aucun `BLOCKED`, aucun avertissement.
+- **Lectures** : les 4 lectures de démarrage (`79F2`, `7A18`, `A063`, `A0FC`) après la fenêtre silencieuse de 150 s, puis les créneaux
+  horaires. Mêmes trames que l'ancien firmware (`80 7E E3 <id> 01 03 79 F2 00 1C`).
+- **Accusés** : 10 relais de zone (3 à chaque changement du satellite : Réduit, puis Auto) reçus ; chacun a produit exactement un accusé,
+  l'écho du bloc avec réception `0x88`, construit ≈ 12 ms après le relais.
+- **Défaut trouvé et corrigé** : au passage de l'horloge « uptime » à la date de la chaudière, les créneaux `:03` et `:06` suivants étaient
+  sautés (la garde d'une tentative par créneau gardait l'ancienne base de temps). Les gardes sont réinitialisées à la première synchronisation ;
+  un test hôte reproduit le défaut (il échoue sans le correctif).
+- **Retour** : firmware MQTT rétabli à 12:27 par OTA ; aucune anomalie (état « Chauffage », mode Auto) à 12:29.
+- **Pas encore comparé** : un accusé réel de l'ancien firmware pour un relais du même moment (aucun relais ne s'est produit après le retour).
+  L'égalité octet par octet est vérifiée sur la paire réelle du 25/10 (test hôte).
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
