@@ -580,6 +580,17 @@ static void test_engine_schedule_and_failure() {
 }
 
 static void test_zone_mode() {
+  // 0x20 is Auto, reduced (verified: the satellite stayed in Auto while the programme went reduced).
+  const Bytes &reduced = F["payload_sat_broadcast_reduced"];
+  frisquet::SatelliteBroadcast b;
+  CHECK(frisquet::decode_satellite_broadcast(reduced.data(), reduced.size(), b));
+  CHECK(b.mode_raw[0] == 0x20);
+  CHECK(frisquet::decode_zone_mode(b.mode_raw[0]).mode == frisquet::ZoneMode::kReducedAuto);
+  CHECK_NEAR(b.setpoint[0], 17.0f, 0.001f);
+  CHECK(!frisquet::decode_boiler_state(b.state_raw).running);
+  CHECK(frisquet::decode_zone_mode(0x25).mode == frisquet::ZoneMode::kComfortAuto);
+  CHECK(frisquet::decode_zone_mode(0x05).mode == frisquet::ZoneMode::kComfortAuto);
+
   CHECK(frisquet::decode_zone_mode(0x10).mode == frisquet::ZoneMode::kFrostProtection);
   CHECK(frisquet::decode_zone_mode(0x30).mode == frisquet::ZoneMode::kFrostProtection);
   CHECK(frisquet::decode_zone_mode(0x30).connect_compat);

@@ -120,8 +120,17 @@ inline ZoneMode zone_mode_direct(uint8_t value) {
   }
 }
 
+// The broadcast byte is the zone's "options" byte. Verified on 2026-10-26 with the satellite left in
+// Auto while the programme switched from comfort to reduced: the zone block keeps mode 0x05 (auto)
+// and the options byte goes from 0x25 to 0x20. So 0x20 is "Auto, reduced", not permanent reduced.
+// (Whether permanent reduced is also 0x20 is unverified: it needs the satellite set to Reduced.)
 inline DecodedZoneMode decode_zone_mode(uint8_t raw) {
   DecodedZoneMode out;
+  if (raw == 0x20) {
+    out.mode = ZoneMode::kReducedAuto;
+    out.connect_compat = true;
+    return out;
+  }
   out.mode = zone_mode_direct(raw);
   if (out.mode != ZoneMode::kUnknown) return out;
   out.mode = zone_mode_direct(raw ^ kConnectCompatXor);

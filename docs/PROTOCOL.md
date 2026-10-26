@@ -72,9 +72,11 @@ jour de la semaine (1, 0 = dimanche), puis par zone (Z1, Z2, Z3 ; 10 octets chac
 **mode (1)**, inconnu (4) — ces 4 octets semblent contenir température et consigne de départ *(non vérifié)*.
 
 - État chaudière : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 en fonctionnement (`0x28` en marche, `0x20` veille).
-- Mode : `00` réduit permanent, `01` confort permanent, `02` dérogation réduit, `03` dérogation confort, `04` réduit auto,
-  `05` confort auto, `10` hors gel. Le bit `0x20` indique une compatibilité Connect : `0x25` = confort auto.
-  *À recouper avec le thermostat réel : `0x20` seul (réduit permanent) a été vu à 22:10 alors que la zone est en Auto.*
+- Mode : l'octet de mode de la diffusion est l'octet **options** du bloc de zone. Vérifié le 26/10/2026 : la zone restant en Auto
+  (mode `05` du bloc), le passage du programme de confort à réduit fait passer les options de `25` à `20`. Donc `25` = **Auto, confort**
+  et `20` = **Auto, réduit**. Anciennes valeurs de l'ancien firmware : `00` réduit permanent, `01` confort permanent, `02` dérogation réduit,
+  `03` dérogation confort, `04` réduit auto, `05` confort auto, `10` hors gel ; le bit `0x20` est un indicateur de compatibilité Connect.
+  *Non vérifié : le code du réduit **permanent** (il faudrait mettre le satellite en Réduit manuel) ; `0x20` pourrait lui être commun.*
 
 ## Échanges de zone (type 0x17, 63 octets)
 

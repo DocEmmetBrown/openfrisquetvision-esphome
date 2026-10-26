@@ -18,6 +18,9 @@ raw_79f2_firing2_inserted_zero = 3F 7E 80 E3 18 81 03 38 00 C5 04 F6 04 F6 01 29
 # Boiler -> zone-1 satellite broadcast, 2026-10-25 17:57:03, mode byte 0x25 (0x05 with the Connect-compat bit)
 payload_sat_broadcast = 08 80 FA C0 81 17 2A 05 0A 00 00 26 10 25 17 57 03 28 00 00 BA 00 C8 00 25 00 00 01 1A 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
 
+# Same broadcast at 22:10:12 (reduced period, satellite in Auto): mode byte 0x20 = Auto, reduced
+payload_sat_broadcast_reduced = 08 80 FA 60 81 17 2A 05 0A 00 00 26 10 25 22 10 12 20 00 00 C9 00 AA 00 20 00 C6 00 C6 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
+
 # Same kind of broadcast at 13:10:12, plain mode byte 0x05
 payload_sat_broadcast_plain = 08 80 FA 28 81 17 2A 05 0A 00 00 26 10 25 13 10 12 28 00 00 C8 00 BE 00 05 01 29 00 FF 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
 
