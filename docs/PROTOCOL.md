@@ -76,7 +76,8 @@ jour de la semaine (1, 0 = dimanche), puis par zone (Z1, Z2, Z3 ; 10 octets chac
   (mode `05` du bloc), le passage du programme de confort à réduit fait passer les options de `25` à `20`. Donc `25` = **Auto, confort**
   et `20` = **Auto, réduit**. Anciennes valeurs de l'ancien firmware : `00` réduit permanent, `01` confort permanent, `02` dérogation réduit,
   `03` dérogation confort, `04` réduit auto, `05` confort auto, `10` hors gel ; le bit `0x20` est un indicateur de compatibilité Connect.
-  *Non vérifié : le code du réduit **permanent** (il faudrait mettre le satellite en Réduit manuel) ; `0x20` pourrait lui être commun.*
+  *Vérifié aussi : le réduit **permanent** (satellite mis en Réduit à la main, 26/10 10:24) donne une diffusion `00` et un bloc de mode `07`,
+  options `00`. `20` (Auto réduit) et `00` (réduit permanent) sont donc bien distincts.*
 
 ## Échanges de zone (type 0x17, 63 octets)
 

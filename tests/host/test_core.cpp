@@ -589,6 +589,8 @@ static void test_zone_mode() {
   CHECK_NEAR(b.setpoint[0], 17.0f, 0.001f);
   CHECK(!frisquet::decode_boiler_state(b.state_raw).running);
   CHECK(frisquet::decode_zone_mode(0x25).mode == frisquet::ZoneMode::kComfortAuto);
+  CHECK(frisquet::decode_zone_mode(0x00).mode == frisquet::ZoneMode::kReducedPermanent);
+  CHECK(!frisquet::decode_zone_mode(0x00).connect_compat);
   CHECK(frisquet::decode_zone_mode(0x05).mode == frisquet::ZoneMode::kComfortAuto);
 
   CHECK(frisquet::decode_zone_mode(0x10).mode == frisquet::ZoneMode::kFrostProtection);
