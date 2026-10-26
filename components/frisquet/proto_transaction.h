@@ -33,6 +33,7 @@ class ReadTransaction {
   }
 
   bool active() const { return state_ == State::kRunning; }
+  void abort() { state_ = State::kIdle; }
   bool done() const { return state_ == State::kDone; }
   bool failed() const { return state_ == State::kFailed; }
   uint8_t message_id() const { return message_id_; }

@@ -13,6 +13,7 @@
 
 #include "../../components/frisquet/proto_crc.h"
 #include "../../components/frisquet/proto_decode.h"
+#include "../../components/frisquet/proto_engine.h"
 #include "../../components/frisquet/proto_schedule.h"
 #include "../../components/frisquet/proto_transaction.h"
 #include "../../components/frisquet/proto_txgate.h"
@@ -360,6 +361,224 @@ static void test_read_transaction() {
   CHECK(g.on_frame(late.data(), late.size()));
 }
 
+static void test_boiler_clock() {
+  using namespace frisquet;
+  CHECK(days_from_civil(1970, 1, 1) == 0);
+  CHECK(days_from_civil(2000, 1, 1) == 10957);
+
+  BoilerClock clock;
+  CHECK(!clock.known());
+  CHECK(clock.seconds(7000) == 7);  // unknown: uptime seconds
+  // The 17:57:03 broadcast of 2026-10-25.
+  CHECK(clock.set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03));
+  CHECK(clock.known());
+  CHECK(clock.seconds(0) == 1792951023u);
+  CHECK(clock.seconds(5000) == 1792951028u);
+  CHECK(clock.seconds(0) % 600 == 423);  // 7:03 into the 10-minute cycle
+  // Day rollover and leap days.
+  CHECK(clock.set_from_bcd(100, 0x26, 0x10, 0x26, 0x09, 0x20, 0x12));
+  CHECK(clock.seconds(100) == 1793006412u);
+  CHECK(clock.set_from_bcd(0, 0x26, 0x02, 0x28, 0x23, 0x59, 0x59));
+  CHECK(clock.seconds(0) == 1772323199u);
+  CHECK(clock.seconds(1000) == 1772323200u);
+  CHECK(clock.set_from_bcd(0, 0x28, 0x02, 0x29, 0x12, 0x00, 0x00));
+  CHECK(clock.seconds(0) == 1835438400u);
+  // Implausible or non-BCD dates are refused and leave the clock as it was.
+  CHECK(!clock.set_from_bcd(0, 0x2A, 0x10, 0x25, 0x17, 0x57, 0x03));
+  CHECK(!clock.set_from_bcd(0, 0x26, 0x13, 0x25, 0x17, 0x57, 0x03));
+  CHECK(!clock.set_from_bcd(0, 0x26, 0x10, 0x00, 0x17, 0x57, 0x03));
+  CHECK(!clock.set_from_bcd(0, 0x26, 0x10, 0x25, 0x24, 0x57, 0x03));
+  CHECK(!clock.set_from_bcd(0, 0x19, 0x10, 0x25, 0x17, 0x57, 0x03));
+  CHECK(clock.seconds(0) == 1835438400u);
+}
+
+static frisquet::TxPolicy engine_policy(frisquet::TxLevel level, bool dry_run) {
+  frisquet::TxPolicy p;
+  p.level = level;
+  p.dry_run = dry_run;
+  p.association = 0xE3;
+  return p;
+}
+
+static void test_engine_acknowledges_zone_relays() {
+  using namespace frisquet;
+  const Bytes &relay = F["payload_zone_block"];
+  const Bytes &ack = F["payload_zone_ack"];
+  ReadResult result;
+  TxRequest tx;
+
+  // Dry run: the acknowledgement is built exactly as the MQTT firmware sent it, not transmitted.
+  ConnectEngine dry;
+  dry.set_policy(engine_policy(TxLevel::kAck, true));
+  CHECK(!dry.on_frame(1000, relay.data(), relay.size(), result));
+  CHECK(dry.poll(1010, tx));
+  CHECK(tx.verdict == TxVerdict::kDryRun && tx.kind == TxClass::kZoneAck);
+  CHECK(tx.length == ack.size() && memcmp(tx.frame, ack.data(), ack.size()) == 0);
+  CHECK(!dry.poll(1020, tx));  // once per relay
+  CHECK(dry.stats().dry_runs == 1);
+
+  // Live: sent, and each repetition of the relay is acknowledged again.
+  ConnectEngine live;
+  live.set_policy(engine_policy(TxLevel::kAck, false));
+  live.on_frame(1000, relay.data(), relay.size(), result);
+  CHECK(live.poll(1010, tx) && tx.verdict == TxVerdict::kSend);
+  live.on_frame(5000, relay.data(), relay.size(), result);
+  CHECK(live.poll(5010, tx) && tx.verdict == TxVerdict::kSend);
+  CHECK(live.stats().acks_sent == 2);
+
+  // Read-only level, kill switch, and not associated: never sent.
+  ConnectEngine read_only;
+  read_only.set_policy(engine_policy(TxLevel::kRead, false));
+  read_only.on_frame(0, relay.data(), relay.size(), result);
+  CHECK(read_only.poll(1, tx) && tx.verdict == TxVerdict::kBlockedLevel);
+  CHECK(read_only.stats().acks_blocked == 1 && read_only.stats().acks_sent == 0);
+
+  ConnectEngine killed;
+  killed.set_policy(engine_policy(TxLevel::kAck, false));
+  killed.set_kill_switch(true);
+  killed.on_frame(0, relay.data(), relay.size(), result);
+  CHECK(killed.poll(1, tx) && tx.verdict == TxVerdict::kBlockedKillSwitch);
+
+  ConnectEngine unassociated;
+  TxPolicy p = engine_policy(TxLevel::kAck, false);
+  p.association = 0xFF;
+  unassociated.set_policy(p);
+  unassociated.on_frame(0, relay.data(), relay.size(), result);
+  CHECK(unassociated.poll(1, tx) && tx.verdict == TxVerdict::kBlockedIdentity);
+
+  // Frames that are not relays for us produce nothing.
+  ConnectEngine other;
+  other.set_policy(engine_policy(TxLevel::kAck, false));
+  const Bytes &broadcast = F["payload_sat_broadcast"];
+  other.on_frame(0, broadcast.data(), broadcast.size(), result);
+  CHECK(!other.poll(1, tx));
+}
+
+static void test_engine_reads() {
+  using namespace frisquet;
+  const Bytes &info = F["payload_79f2_idle"];       // id 0x86
+  const Bytes &consumption = F["payload_7a18"];     // id 0x1A
+  ReadResult result;
+  TxRequest tx;
+
+  // Start-up reads, live: one at a time, in order, ids incrementing.
+  ConnectEngine e;
+  e.set_policy(engine_policy(TxLevel::kRead, false));
+  e.set_next_message_id(0x86);
+  e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);  // 7:03 into the cycle: not quiet
+  e.request_initial_reads();
+  CHECK(e.poll(0, tx) && tx.verdict == TxVerdict::kSend && tx.kind == TxClass::kReadRequest);
+  CHECK(tx.length == 10 && tx.frame[3] == 0x86 && be16(tx.frame + 6) == 0x79F2);
+  CHECK(e.reading());
+  CHECK(!e.poll(100, tx));  // waiting between retransmissions
+  CHECK(e.poll(2300, tx) && tx.frame[3] == 0x86);  // same id, second send
+  CHECK(e.on_frame(2400, info.data(), info.size(), result));
+  CHECK(result.kind == ReadKind::kInfo && result.length == info.size());
+  CHECK(!e.reading());
+  CHECK(e.stats().reads_ok == 1);
+  // Next queued read: consumption, with the next id.
+  CHECK(e.poll(2500, tx) && be16(tx.frame + 6) == 0x7A18 && tx.frame[3] == 0x87);
+  Bytes answer = consumption;
+  answer[3] = 0x87;
+  CHECK(e.on_frame(2600, answer.data(), answer.size(), result) && result.kind == ReadKind::kConsumption);
+  CHECK(e.poll(2700, tx) && be16(tx.frame + 6) == 0xA063 && tx.frame[3] == 0x88);
+
+  // Dry run: every queued read is shown once, nothing is awaited.
+  ConnectEngine dry;
+  dry.set_policy(engine_policy(TxLevel::kRead, true));
+  dry.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  dry.request_initial_reads();
+  int shown = 0;
+  for (int i = 0; i < 10; ++i)
+    if (dry.poll(i * 10, tx)) {
+      CHECK(tx.verdict == TxVerdict::kDryRun);
+      ++shown;
+    }
+  CHECK(shown == 4 && dry.stats().dry_runs == 4 && !dry.reading());
+
+  // Level none: reads are blocked and abandoned, not retried in a loop.
+  ConnectEngine none;
+  none.set_policy(engine_policy(TxLevel::kNone, false));
+  none.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  none.request_initial_reads();
+  int blocked = 0;
+  for (int i = 0; i < 10; ++i)
+    if (none.poll(i * 10, tx)) {
+      CHECK(tx.verdict == TxVerdict::kBlockedLevel);
+      ++blocked;
+    }
+  CHECK(blocked == 4 && none.stats().blocked == 4);
+}
+
+static void test_engine_schedule_and_failure() {
+  using namespace frisquet;
+  ReadResult result;
+  TxRequest tx;
+
+  // Reads wait for the end of the quiet window.
+  ConnectEngine q;
+  q.set_policy(engine_policy(TxLevel::kRead, false));
+  q.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x50, 0x30);  // 0:30 into the cycle
+  q.request_initial_reads();
+  CHECK(!q.poll(0, tx));
+  CHECK(!q.poll(119000, tx));  // 2:29
+  CHECK(q.poll(120000, tx) && be16(tx.frame + 6) == 0x79F2);  // 2:30: window over
+
+  // The :03 slot (180 s into the cycle) queues a temperature read, once.
+  ConnectEngine s;
+  s.set_policy(engine_policy(TxLevel::kRead, true));
+  s.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x52, 0x55);  // 2:55 into the cycle
+  CHECK(!s.poll(0, tx));
+  CHECK(!s.poll(4000, tx));
+  CHECK(s.poll(5000, tx) && be16(tx.frame + 6) == 0x79F2);  // 3:00
+  CHECK(!s.poll(6000, tx) && !s.poll(8000, tx));
+  // :06 slot, then :08.
+  CHECK(s.poll(185000, tx) && be16(tx.frame + 6) == 0x79F2);
+  CHECK(s.poll(305000, tx) && be16(tx.frame + 6) == 0x79F2);
+  CHECK(s.stats().reads_started == 3);
+
+  // The hourly slots: :05 queues consumption then annual consumption, :07 the hot-water mode.
+  ConnectEngine h;
+  h.set_policy(engine_policy(TxLevel::kRead, true));
+  h.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x18, 0x04, 0x55);  // 18:04:55
+  CHECK(!h.poll(0, tx));
+  CHECK(h.poll(5000, tx) && be16(tx.frame + 6) == 0x7A18);   // 18:05:00
+  CHECK(h.poll(5100, tx) && be16(tx.frame + 6) == 0xA063);
+  CHECK(!h.poll(5200, tx));
+  CHECK(h.poll(125000, tx) && be16(tx.frame + 6) == 0xA0FC);  // 18:07:00
+
+  // No answer: two attempts, 10 sends, the failure is counted and the id moves on by two.
+  ConnectEngine f;
+  f.set_policy(engine_policy(TxLevel::kRead, false));
+  f.set_next_message_id(0x0A);
+  f.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  f.request_initial_reads();
+  int sends = 0;
+  uint32_t last_send_ms = 0;
+  for (uint32_t now = 0; now <= 22000; now += 100) {
+    if (f.poll(now, tx) && be16(tx.frame + 6) == 0x79F2) {
+      ++sends;
+      last_send_ms = now;
+    }
+  }
+  CHECK(sends == 10 && last_send_ms == 19800);
+  CHECK(f.stats().reads_failed == 1);
+  CHECK(f.next_message_id() == 0x0C);
+
+  // An acknowledgement due while a read is in progress goes first, and the read carries on.
+  ConnectEngine a;
+  a.set_policy(engine_policy(TxLevel::kAck, false));
+  a.set_next_message_id(0x20);
+  a.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  a.request_initial_reads();
+  CHECK(a.poll(0, tx) && tx.kind == TxClass::kReadRequest);
+  const Bytes &relay = F["payload_zone_block"];
+  a.on_frame(500, relay.data(), relay.size(), result);
+  CHECK(a.poll(600, tx) && tx.kind == TxClass::kZoneAck && tx.verdict == TxVerdict::kSend);
+  CHECK(a.reading());
+  CHECK(a.poll(2200, tx) && tx.kind == TxClass::kReadRequest && tx.frame[3] == 0x20);
+}
+
 static void test_zone_mode() {
   CHECK(frisquet::decode_zone_mode(0x10).mode == frisquet::ZoneMode::kFrostProtection);
   CHECK(frisquet::decode_zone_mode(0x30).mode == frisquet::ZoneMode::kFrostProtection);
@@ -576,6 +795,10 @@ int main() {
   test_builders_match_real_frames();
   test_tx_gate();
   test_read_transaction();
+  test_boiler_clock();
+  test_engine_acknowledges_zone_relays();
+  test_engine_reads();
+  test_engine_schedule_and_failure();
   test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();
