@@ -447,6 +447,16 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   l'ESPHome change l'octet d'association du Connect ; le firmware MQTT de retour garderait l'ancien (`0xE3`) et devrait être
   réassocié à son tour.
 
+### 10.15 Fenêtre de récupération du NetworkID sans mode association du 27/10/2026 (12:06 – 12:10, `tx: write`, `pairing: false`)
+
+- Démarrage sur `05:D9:8D:C9 (YAML), association E3` ; bloc de zone restauré comme en 10.13.
+- 12:09:02 : bouton « récupérer le NetworkID », chaudière **pas** en mode association : passage sur `FF:FF:FF:FF`, **rien émis**
+  pendant 30 s (une lecture `A063` partie à 12:09:02.03 attendait sa réponse ; seul un bruit `INVALID_LENGTH` reçu).
+- 12:09:32 : `failed`, retour sur `05:D9:8D:C9` ; la lecture interrompue est renvoyée (même id) 20 ms après et répondue aussitôt,
+  lectures 5/5, 0 trame bloquée. C'est le chemin du bug du 25/10, vérifié sur la carte.
+- Bouton « oublier » sans réseau appris : reste sur le YAML. Retour au firmware MQTT à 12:10 : aucune anomalie.
+- Reste : une offre réelle (chaudière en mode association) en récupération seule, puis, éventuellement, l'association.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
