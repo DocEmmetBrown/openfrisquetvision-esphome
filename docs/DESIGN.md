@@ -400,7 +400,18 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   (mode, consigne active, horloge). Une diffusion incohérente **efface** la copie (retour à « inconnu »). La vérification n'est que partielle :
   une modification du programme ou d'une consigne inactive peut passer inaperçue.
 - Sauvegarde seulement quand le bloc change (relais nouveau, écriture vérifiée, copie effacée), pas à chaque répétition d'un relais.
-- Pas encore fait : validation sur la chaudière (redémarrage ⇒ « restauré », puis « confirmé » à la diffusion suivante, puis écriture), zones 2 et 3.
+- Pas encore fait : écriture depuis un bloc restauré puis confirmé, zones 2 et 3.
+
+### 10.12 Fenêtre de validation de la persistance du 27/10/2026 (10:57 – 11:10, `tx: write`, `dry_run: false`, aucune écriture)
+
+- 10:57 : MQTT → ESPHome `0.6.0-phase-2c-zone` par `/api/update` du portail. Premier démarrage : bloc « inconnu » (rien de sauvegardé).
+- 11:02:42 : relais provoqué par l'utilisateur (confort 20,5 → 20,0 sur le satellite) : accusé envoyé, bloc « confirmé », **une seule**
+  sauvegarde (`mask 1`) malgré les répétitions du relais.
+- 11:03:17 : redémarrage par OTA ESPHome de la même image. Au démarrage : « restauré (non confirmé) », consignes 20,0 / 17,0 / 8,0 affichées
+  aussitôt (auparavant inconnues jusqu'au relais suivant).
+- 11:10:09 : diffusion `08 80 FA` du satellite cohérente ⇒ « confirmé », sans nouvelle sauvegarde. Diffusions reçues à 11:00:09, 11:02:39
+  puis 11:10:09 seulement (RSSI ≈ −100 dBm) : il faut compter jusqu'à ~10 min avant la confirmation.
+- 11:10:41 : retour au firmware MQTT (`b1e6934`, recompilé pour l'occasion) : portail, MQTT, ECS « Eco Horaires », zone 1 Auto 20,0, aucune anomalie.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
