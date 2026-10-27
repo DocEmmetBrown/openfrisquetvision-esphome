@@ -10,6 +10,7 @@
 #include "proto_schedule.h"
 #include "proto_transaction.h"
 #include "proto_txgate.h"
+#include "proto_zone_store.h"
 
 namespace frisquet {
 
@@ -82,6 +83,44 @@ class ConnectEngine {
   // Zone blocks: learned from the relays the boiler sends us (the block cannot be read back).
   bool zone_block_known(uint8_t zone_index) const { return zone_index < 3 && zone_known_[zone_index]; }
   const uint8_t *zone_block(uint8_t zone_index) const { return zone_index < 3 ? zone_block_[zone_index] : nullptr; }
+  // A block is "confirmed" once the boiler relayed it (or we wrote it and the boiler echoed it) since boot, or the
+  // satellite's broadcast agreed with a restored copy. Writes start only from a confirmed block.
+  bool zone_block_confirmed(uint8_t zone_index) const { return zone_index < 3 && zone_confirmed_[zone_index]; }
+
+  // Blocks remembered across reboots: known (shown) but not confirmed (not writable).
+  void restore_zone_block(uint8_t zone_index, const uint8_t *block) {
+    if (zone_index >= 3 || !block || zone_known_[zone_index]) return;
+    memcpy(zone_block_[zone_index], block, kZoneBlockSize);
+    zone_known_[zone_index] = true;
+    zone_confirmed_[zone_index] = false;
+  }
+
+  // The satellite's broadcast for a zone. Confirms a restored block that agrees with it, drops one that does not.
+  void on_zone_broadcast(uint8_t zone_index, uint8_t mode_raw, float setpoint, uint8_t weekday, uint8_t hour_bcd,
+                         uint8_t minute_bcd) {
+    if (zone_index >= 3 || !zone_known_[zone_index] || zone_confirmed_[zone_index] || zone_write_pending()) return;
+    switch (check_block_against_broadcast(zone_block_[zone_index], mode_raw, setpoint, weekday, hour_bcd, minute_bcd)) {
+      case BlockCheck::kConsistent:
+        zone_confirmed_[zone_index] = true;
+        break;
+      case BlockCheck::kInconsistent:
+        zone_known_[zone_index] = false;
+        zone_dirty_ = true;
+        break;
+      default: break;
+    }
+  }
+
+  // True once after every change of a known block (relay, verified write, discarded copy): time to persist.
+  bool take_zone_dirty() {
+    const bool dirty = zone_dirty_;
+    zone_dirty_ = false;
+    return dirty;
+  }
+  uint8_t zone_known_mask() const {
+    return static_cast<uint8_t>((zone_known_[0] ? 1 : 0) | (zone_known_[1] ? 2 : 0) | (zone_known_[2] ? 4 : 0));
+  }
+  const uint8_t (*zone_blocks() const)[kZoneBlockSize] { return zone_block_; }
   WriteState zone_write_state() const { return zone_state_; }
   uint8_t zone_write_zone() const { return zone_index_; }
   bool zone_write_pending() const { return zone_state_ == WriteState::kQueued || zone_state_ == WriteState::kSending; }
@@ -89,7 +128,7 @@ class ConnectEngine {
   // Ask for a new block for a zone. Refused while a zone write is pending and until the zone's current block
   // is known: every byte not meant to change is copied from it. The gate decides what may really change.
   bool request_zone_block(uint8_t zone_index, const uint8_t *block, uint8_t fields) {
-    if (zone_index >= 3 || !zone_known_[zone_index] || zone_write_pending() || !block) return false;
+    if (zone_index >= 3 || !zone_confirmed_[zone_index] || zone_write_pending() || !block) return false;
     memcpy(zone_request_, block, kZoneBlockSize);
     zone_fields_ = fields;
     zone_index_ = zone_index;
@@ -99,7 +138,7 @@ class ConnectEngine {
   // Mode: 0x05 auto, 0x06 comfort, 0x07 reduced, 0x08 frost protection. The options byte follows the MQTT firmware's
   // Zone::setMode: only bits 0x17 change; in Auto the current comfort bit is kept (the satellite recomputes it).
   bool request_zone_mode(uint8_t zone_index, uint8_t mode) {
-    if (zone_index >= 3 || !zone_known_[zone_index] || mode < 0x05 || mode > 0x08) return false;
+    if (zone_index >= 3 || !zone_confirmed_[zone_index] || mode < 0x05 || mode > 0x08) return false;
     uint8_t block[kZoneBlockSize];
     memcpy(block, zone_block_[zone_index], kZoneBlockSize);
     uint8_t owned = 0;
@@ -114,14 +153,14 @@ class ConnectEngine {
     return request_zone_block(zone_index, block, kZoneFieldMode);
   }
   bool request_zone_program(uint8_t zone_index, const uint8_t *program) {
-    if (zone_index >= 3 || !zone_known_[zone_index] || !program) return false;
+    if (zone_index >= 3 || !zone_confirmed_[zone_index] || !program) return false;
     uint8_t block[kZoneBlockSize];
     memcpy(block, zone_block_[zone_index], kZoneBlockSize);
     memcpy(block + 6, program, 42);
     return request_zone_block(zone_index, block, kZoneFieldProgram);
   }
   bool request_zone_setpoints(uint8_t zone_index, uint8_t comfort_raw, uint8_t reduced_raw, uint8_t frost_raw) {
-    if (zone_index >= 3 || !zone_known_[zone_index]) return false;
+    if (zone_index >= 3 || !zone_confirmed_[zone_index]) return false;
     uint8_t block[kZoneBlockSize];
     memcpy(block, zone_block_[zone_index], kZoneBlockSize);
     block[0] = comfort_raw;
@@ -139,13 +178,18 @@ class ConnectEngine {
       // A pending write owns the block: what the boiler relays meanwhile is the old one.
       const uint8_t index = payload[4] - kIdZone1;
       if (!zone_write_pending() && index < 3) {
+        // The boiler repeats a relay until it is acknowledged: persist only what is new.
+        if (!zone_known_[index] || memcmp(zone_block_[index], payload + 15, kZoneBlockSize) != 0) zone_dirty_ = true;
         memcpy(zone_block_[index], payload + 15, kZoneBlockSize);
         zone_known_[index] = true;
+        zone_confirmed_[index] = true;
       }
     }
     if (zone_write_pending() && is_zone_write_reply_(payload, length)) {
+      if (memcmp(zone_block_[zone_index_], zone_request_, kZoneBlockSize) != 0) zone_dirty_ = true;
       memcpy(zone_block_[zone_index_], zone_request_, kZoneBlockSize);
       zone_known_[zone_index_] = true;
+      zone_confirmed_[zone_index_] = true;
       zone_state_ = WriteState::kVerified;
       ++stats_.zone_writes_acked;
       if (zone_writing_) {
@@ -243,7 +287,7 @@ class ConnectEngine {
     TxPolicy gate = policy_;
     if (zone_writing_) gate.zone_write_mask &= zone_fields_;
     tx.verdict = evaluate_tx(gate, tx.frame, tx.length, nullptr, 0, &tx.kind,
-                             zone_writing_ && zone_known_[zone_index_] ? zone_block_[zone_index_] : nullptr);
+                             zone_writing_ && zone_confirmed_[zone_index_] ? zone_block_[zone_index_] : nullptr);
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
@@ -398,6 +442,8 @@ class ConnectEngine {
   bool ack_pending_ = false;
   uint8_t zone_block_[3][kZoneBlockSize] = {};
   bool zone_known_[3] = {};
+  bool zone_confirmed_[3] = {};
+  bool zone_dirty_ = false;
   uint8_t zone_request_[kZoneBlockSize] = {};
   uint8_t zone_index_ = 0;
   uint8_t zone_fields_ = 0;

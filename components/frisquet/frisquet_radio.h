@@ -8,6 +8,7 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
+#include "esphome/core/preferences.h"
 #ifdef USE_SELECT
 #include "esphome/components/select/select.h"
 #endif
@@ -22,6 +23,7 @@
 #include "proto_decode.h"
 #include "proto_encode.h"
 #include "proto_tracker.h"
+#include "proto_zone_store.h"
 #ifdef FRISQUET_TX_ENABLED
 #include "proto_engine.h"
 #endif
@@ -81,7 +83,13 @@ enum TextId : uint8_t {
   kHotWaterWrite,
   kZoneWrite,
   kZoneProgram,
+  kZoneBlockState,
   kTextCount,
+};
+
+// The persisted record: opaque bytes, packed and checked by pack_zone_store() / unpack_zone_store().
+struct ZoneStoreBlob {
+  uint8_t data[::frisquet::kZoneStoreSize];
 };
 
 // The transmit path (tx: read | ack) is compiled only when FRISQUET_TX_ENABLED is defined.
@@ -155,6 +163,8 @@ class FrisquetRadio : public Component {
   void transmit_pending_();
   void sync_hot_water_();
   void sync_zone_();
+  void restore_zone_blocks_();
+  void save_zone_blocks_();
 #endif
 
   uint8_t cs_{8}, irq_{14}, reset_{12}, busy_{13}, sck_{9}, miso_{11}, mosi_{10};
@@ -192,6 +202,8 @@ class FrisquetRadio : public Component {
   ::frisquet::WriteState last_zone_state_{::frisquet::WriteState::kIdle};
   int last_zone_raw_[3]{-1, -1, -1};
   int last_zone_mode_{-1};
+  int last_block_state_{-1};
+  ESPPreferenceObject store_pref_;
   std::string last_program_;
 #endif
 #ifdef USE_NUMBER

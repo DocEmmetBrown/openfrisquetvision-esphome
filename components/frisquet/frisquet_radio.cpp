@@ -161,7 +161,36 @@ bool FrisquetRadio::request_zone_program(const std::string &hex) {
   return this->engine_.request_zone_program(0, program);
 }
 
+void FrisquetRadio::restore_zone_blocks_() {
+  this->store_pref_ = global_preferences->make_preference<ZoneStoreBlob>(fnv1_hash("frisquet_zone_blocks"));
+  ZoneStoreBlob blob;
+  uint8_t mask = 0;
+  uint8_t blocks[3][::frisquet::kZoneBlockSize] = {};
+  if (!this->store_pref_.load(&blob) || !::frisquet::unpack_zone_store(blob.data, sizeof(blob.data), mask, blocks)) {
+    ESP_LOGI(TAG, "No stored zone block");
+    return;
+  }
+  for (uint8_t zone = 0; zone < 3; ++zone)
+    if (mask & (1 << zone)) this->engine_.restore_zone_block(zone, blocks[zone]);
+  ESP_LOGI(TAG, "Restored zone blocks (mask %u): writable once a relay or the satellite's broadcast confirms them", mask);
+}
+
+void FrisquetRadio::save_zone_blocks_() {
+  ZoneStoreBlob blob;
+  ::frisquet::pack_zone_store(this->engine_.zone_known_mask(), this->engine_.zone_blocks(), blob.data);
+  if (!this->store_pref_.save(&blob)) ESP_LOGW(TAG, "Saving the zone blocks failed");
+  else ESP_LOGI(TAG, "Zone blocks saved (mask %u)", this->engine_.zone_known_mask());
+}
+
 void FrisquetRadio::sync_zone_() {
+  if (this->engine_.take_zone_dirty()) this->save_zone_blocks_();
+  const int block_state = !this->engine_.zone_block_known(0) ? 0 : (this->engine_.zone_block_confirmed(0) ? 2 : 1);
+  if (block_state != this->last_block_state_) {
+    this->last_block_state_ = block_state;
+    static const char *const names[3] = {"inconnu", "restauré (non confirmé)", "confirmé"};
+    ESP_LOGI(TAG, "Zone 1 block: %s", names[block_state]);
+    this->publish_text_(kZoneBlockState, names[block_state]);
+  }
   const ::frisquet::WriteState state = this->engine_.zone_write_state();
   if (state != this->last_zone_state_) {
     this->last_zone_state_ = state;
@@ -293,6 +322,7 @@ void FrisquetRadio::setup() {
   this->engine_.set_policy(policy);
   this->engine_.set_next_message_id(static_cast<uint8_t>(random_uint32() & 0xFF));
   this->engine_.request_initial_reads();
+  this->restore_zone_blocks_();
 #endif
   this->rearm_("setup");
 }
@@ -575,6 +605,8 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
 #ifdef FRISQUET_TX_ENABLED
   // The broadcast date drives the radio slots, as the MQTT firmware's clock does.
   this->engine_.clock().set_from_bcd(millis(), b.year, b.month, b.day, b.hour, b.minute, b.second);
+  // A block restored after a reboot is confirmed (or discarded) by what the satellite itself reports.
+  this->engine_.on_zone_broadcast(0, b.mode_raw[0], b.setpoint[0], b.weekday, b.hour, b.minute);
 #endif
   this->publish_activity_();
 }

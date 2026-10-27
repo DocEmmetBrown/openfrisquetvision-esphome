@@ -7,7 +7,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.5.0-phase-2c-zone"
+    version: "0.6.0-phase-2c-zone"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -81,6 +81,8 @@ frisquet:
     name: Zone 1 écriture consignes
   zone_program:
     name: Zone 1 programme (lisible)
+  zone_block_state:
+    name: Zone 1 bloc mémorisé
   boiler_activity:
     name: Chaudière activité
   reads_ok:

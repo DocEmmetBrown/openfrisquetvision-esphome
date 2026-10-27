@@ -134,6 +134,8 @@ TEXT_SENSORS = {
     "zone_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     # Zone 1 programme as readable ranges ("Dim 09:30-22:00 | Lun 08:00-21:30 | ...").
     "zone_program": text_sensor.text_sensor_schema(),
+    # Zone 1 block: inconnu / restauré (non confirmé) / confirmé. Writes need "confirmé".
+    "zone_block_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 

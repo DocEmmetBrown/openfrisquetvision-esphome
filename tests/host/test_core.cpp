@@ -1077,6 +1077,116 @@ static void test_program_text() {
   CHECK(parse_program_hex(hex, 84, back));
 }
 
+static void test_zone_store_and_restore() {
+  using namespace frisquet;
+  const Bytes &relay = F["payload_zone_block"];  // 25/10 17:57:06: comfort 20.0, reduced 17.0, Auto, Sunday 09:30-22:00
+  const uint8_t *block = relay.data() + 15;
+  uint8_t blocks[3][kZoneBlockSize] = {};
+  memcpy(blocks[0], block, kZoneBlockSize);
+  memcpy(blocks[2], block, kZoneBlockSize);
+  blocks[2][0] = 0x8C;
+
+  // Record: round trip, and every kind of damage is refused.
+  uint8_t record[kZoneStoreSize];
+  pack_zone_store(0x05, blocks, record);
+  uint8_t mask = 0;
+  uint8_t back[3][kZoneBlockSize] = {};
+  CHECK(unpack_zone_store(record, sizeof(record), mask, back) && mask == 0x05);
+  CHECK(memcmp(back[0], blocks[0], kZoneBlockSize) == 0 && memcmp(back[2], blocks[2], kZoneBlockSize) == 0);
+  uint8_t damaged[kZoneStoreSize];
+  memcpy(damaged, record, sizeof(record));
+  damaged[20] ^= 0x01;
+  CHECK(!unpack_zone_store(damaged, sizeof(damaged), mask, back));
+  memcpy(damaged, record, sizeof(record));
+  damaged[4] = 2;
+  CHECK(!unpack_zone_store(damaged, sizeof(damaged), mask, back));
+  memcpy(damaged, record, sizeof(record));
+  damaged[0] = 'X';
+  CHECK(!unpack_zone_store(damaged, sizeof(damaged), mask, back));
+  CHECK(!unpack_zone_store(record, sizeof(record) - 1, mask, back) && !unpack_zone_store(nullptr, 0, mask, back));
+  uint8_t zeros[kZoneStoreSize] = {};
+  CHECK(!unpack_zone_store(zeros, sizeof(zeros), mask, back));  // erased flash
+
+  // Check against real broadcasts.
+  SatelliteBroadcast comfort_b, reduced_b;
+  CHECK(decode_satellite_broadcast(F["payload_sat_broadcast"].data(), F["payload_sat_broadcast"].size(), comfort_b));
+  CHECK(decode_satellite_broadcast(F["payload_sat_broadcast_reduced"].data(),
+                                   F["payload_sat_broadcast_reduced"].size(), reduced_b));
+  auto check = [&](const uint8_t *b, const SatelliteBroadcast &sb) {
+    return check_block_against_broadcast(b, sb.mode_raw[0], sb.setpoint[0], sb.weekday, sb.hour, sb.minute);
+  };
+  CHECK(check(block, comfort_b) == BlockCheck::kConsistent);  // 17:57 Sunday: comfort 20.0
+  CHECK(check(block, reduced_b) == BlockCheck::kConsistent);  // 22:10 Sunday: reduced 17.0
+  uint8_t changed[kZoneBlockSize];
+  memcpy(changed, block, kZoneBlockSize);
+  changed[0] = 0x8C;  // another comfort setpoint
+  CHECK(check(changed, comfort_b) == BlockCheck::kInconsistent);
+  memcpy(changed, block, kZoneBlockSize);
+  changed[1] = 0x6E;  // another reduced setpoint
+  CHECK(check(changed, reduced_b) == BlockCheck::kInconsistent);
+  memcpy(changed, block, kZoneBlockSize);
+  memset(changed + 6, 0, 6);  // Sunday has no comfort period any more
+  CHECK(check(changed, comfort_b) == BlockCheck::kInconsistent);
+  changed[3] = 0x07;  // reduced permanent, but the satellite is Auto/comfort
+  CHECK(check(changed, comfort_b) == BlockCheck::kInconsistent);
+  memcpy(changed, block, kZoneBlockSize);
+  changed[3] = 0x06;
+  CHECK(check(changed, reduced_b) == BlockCheck::kInconsistent);
+  // Next to a half-hour boundary, a programme mismatch proves nothing.
+  memcpy(changed, block, kZoneBlockSize);
+  memset(changed + 6, 0, 6);
+  CHECK(check_block_against_broadcast(changed, comfort_b.mode_raw[0], comfort_b.setpoint[0], comfort_b.weekday, 0x17,
+                                      0x31) == BlockCheck::kInconclusive);
+  CHECK(check_block_against_broadcast(block, 0xFF, 20.0f, 0, 0x17, 0x57) == BlockCheck::kInconclusive);
+  CHECK(check_block_against_broadcast(block, comfort_b.mode_raw[0], NAN, 0, 0x17, 0x57) == BlockCheck::kInconclusive);
+
+  // Engine: a restored block is shown but not writable until a relay or a consistent broadcast confirms it.
+  const Bytes &known = F["payload_zone_block"];
+  TxPolicy p = engine_policy(TxLevel::kWrite, false);
+  p.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode | kZoneFieldProgram;
+  ReadResult result;
+
+  ConnectEngine e;
+  e.set_policy(p);
+  e.restore_zone_block(0, block);
+  CHECK(e.zone_block_known(0) && !e.zone_block_confirmed(0) && !e.take_zone_dirty());
+  CHECK(!e.request_zone_setpoints(0, 0x96, 0x78, 0x1E) && !e.request_zone_mode(0, 0x07));
+  uint8_t program[42] = {};
+  CHECK(!e.request_zone_program(0, program));
+  e.on_zone_broadcast(0, comfort_b.mode_raw[0], comfort_b.setpoint[0], comfort_b.weekday, comfort_b.hour,
+                      comfort_b.minute);
+  CHECK(e.zone_block_confirmed(0) && !e.take_zone_dirty());
+  CHECK(e.request_zone_setpoints(0, 0x9B, 0x78, 0x1E));
+
+  // An inconsistent broadcast discards the copy and asks for the (now empty) store to be rewritten.
+  ConnectEngine stale;
+  stale.set_policy(p);
+  memcpy(changed, block, kZoneBlockSize);
+  changed[0] = 0x8C;
+  stale.restore_zone_block(0, changed);
+  stale.on_zone_broadcast(0, comfort_b.mode_raw[0], comfort_b.setpoint[0], comfort_b.weekday, comfort_b.hour,
+                          comfort_b.minute);
+  CHECK(!stale.zone_block_known(0) && stale.take_zone_dirty() && !stale.take_zone_dirty());
+  CHECK(!stale.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+
+  // A relay confirms a restored block (and a changed one replaces it); repeated identical relays are not re-persisted.
+  ConnectEngine r;
+  r.set_policy(p);
+  r.restore_zone_block(0, changed);
+  r.on_frame(100, known.data(), known.size(), result);
+  CHECK(r.zone_block_confirmed(0) && memcmp(r.zone_block(0), block, kZoneBlockSize) == 0);
+  CHECK(r.take_zone_dirty() && !r.take_zone_dirty());
+  r.on_frame(5000, known.data(), known.size(), result);
+  CHECK(!r.take_zone_dirty());
+
+  // A broadcast never overrides a confirmed block, nor one with a write pending.
+  r.on_zone_broadcast(0, 0x00, 5.0f, 0, 0x12, 0x10);
+  CHECK(r.zone_block_known(0) && r.zone_block_confirmed(0));
+
+  // The mask of known blocks for persistence.
+  CHECK(r.zone_known_mask() == 0x01 && memcmp(r.zone_blocks()[0], block, kZoneBlockSize) == 0);
+}
+
 static void test_zone_mode() {
   // 0x20 is Auto, reduced (verified: the satellite stayed in Auto while the programme went reduced).
   const Bytes &reduced = F["payload_sat_broadcast_reduced"];
@@ -1322,6 +1432,7 @@ int main() {
   test_zone_write();
   test_zone_mode_and_program_write();
   test_program_text();
+  test_zone_store_and_restore();
   test_zone_block_and_fault_broadcast();
   test_activity();
   test_other_reads();
