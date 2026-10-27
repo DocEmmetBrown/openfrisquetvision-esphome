@@ -12,7 +12,7 @@ void ZoneSetpointNumber::control(float value) {
   if (this->parent_ == nullptr) return;
   if (!this->parent_->request_zone_setpoint(this->field_, value)) {
     // Nothing was queued: keep showing the value the boiler really has.
-    ESP_LOGW(TAG, "Zone setpoint %.1f refused (block not known yet, a write in progress, or inconsistent values)",
+    ESP_LOGW(TAG, "Zone setpoint %.1f refused (block unknown or not yet confirmed, a write in progress, or inconsistent values)",
              value);
     this->parent_->republish_zone_setpoints();
     return;

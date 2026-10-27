@@ -11,7 +11,7 @@ static const char *const TAG = "frisquet_radio.zone_text";
 void ZoneProgramText::control(const std::string &value) {
   if (this->parent_ == nullptr) return;
   if (!this->parent_->request_zone_program(value)) {
-    ESP_LOGW(TAG, "Programme refused (block not known yet, a write in progress, or not 84 hexadecimal characters)");
+    ESP_LOGW(TAG, "Programme refused (block unknown or not yet confirmed, a write in progress, or not 84 hexadecimal characters)");
     this->parent_->republish_zone_block();
     return;
   }
