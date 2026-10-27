@@ -6,4 +6,5 @@ native ESPHome** (sans broker MQTT).
 
 Basé sur le protocole rétro-conçu par [OpenFrisquetVisio](https://github.com/FreedomNX/OpenFrisquetVisio).
 
-> **Statut : conception validée, phase R (reflash distant) terminée.** Voir [docs/DESIGN.md](docs/DESIGN.md). Dépôt privé (licence amont à clarifier).
+> **Statut : phases R à 2c validées sur la chaudière, 2d (association) codée et testée sur hôte.** Voir [docs/DESIGN.md](docs/DESIGN.md) ;
+> pour reprendre le travail : [docs/RESUME.md](docs/RESUME.md). Dépôt privé (licence amont à clarifier).
