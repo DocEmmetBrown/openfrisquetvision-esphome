@@ -425,6 +425,28 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - 35 trames d'écriture, 0 bloquée. Retour au firmware MQTT à 11:47 : MQTT, ECS « Eco Horaires », zone 1 Auto 20,0, aucune anomalie.
 - L'installation n'a que la zone 1 : les zones 2 et 3 ne peuvent pas être validées sur l'air.
 
+### 10.14 Association et récupération du NetworkID (construction et tests hôte, 27/10/2026)
+
+- `proto_pairing.h` : décodage de l'offre `0x41`, construction de la confirmation (octet pour octet celle du firmware MQTT),
+  session (`écoute` → `confirmation` → `réussie` / `échouée` / `annulée`) et enregistrement `FNW1` (NetworkID, association, CRC32).
+- **Le mot de synchronisation est dicté par la session** : diffusion seulement pendant l'écoute et la confirmation, le réseau de
+  l'installation sinon. La radio compare à chaque boucle ce mot avec celui qu'elle applique : toute sortie (délai de 30 s, 5 s pour
+  confirmer, annulation, arrêt d'urgence, dry-run, refus de la porte, échec de `setSyncWord` réessayé) la ramène sur un vrai réseau.
+  Test hôte de la régression du 25/10, y compris au passage de `millis()` par zéro.
+- Pendant une session, aucune trame de l'installation n'est émise (lectures, accusés, écritures suspendus ; la trame en attente est
+  abandonnée) et les trames entendues ne sont données qu'à la session. Après la session, l'émission et le traitement des trames
+  restent bloqués tant que le mot de synchronisation **réellement appliqué** n'est pas celui de l'installation (cas d'un
+  `setSyncWord` en échec, signalé en revue de code).
+- Porte : classe `association-confirm`, refusée sauf si c'est **exactement** la confirmation de l'offre reçue et que `pairing: true` ;
+  en dry-run ou refusée, la session est annulée (rien ne change de notre côté puisque la chaudière n'a rien reçu).
+- Réussite : NetworkID (et, pour une association, octet d'association) sauvegardés **et écrits en flash aussitôt** (`sync()`), puis
+  utilisés au démarrage à la place du YAML ;
+  bouton « oublier le réseau appris » pour revenir au YAML. Capteurs `network` et `pairing_state`.
+- Configuration `dev/phase-2d-pairing.yaml` (`pairing: false`) : seule la récupération (écoute) peut agir.
+- Pas encore fait : capture d'une offre réelle (chaudière en mode association) ; association sur l'air. **Attention** : associer
+  l'ESPHome change l'octet d'association du Connect ; le firmware MQTT de retour garderait l'ancien (`0xE3`) et devrait être
+  réassocié à son tour.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

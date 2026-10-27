@@ -22,6 +22,7 @@
 #include "proto_crc.h"
 #include "proto_decode.h"
 #include "proto_encode.h"
+#include "proto_pairing.h"
 #include "proto_tracker.h"
 #include "proto_zone_store.h"
 #ifdef FRISQUET_TX_ENABLED
@@ -84,12 +85,17 @@ enum TextId : uint8_t {
   kZoneWrite,
   kZoneProgram,
   kZoneBlockState,
+  kNetwork,
+  kPairingState,
   kTextCount,
 };
 
 // The persisted record: opaque bytes, packed and checked by pack_zone_store() / unpack_zone_store().
 struct ZoneStoreBlob {
   uint8_t data[::frisquet::kZoneStoreSize];
+};
+struct NetworkStoreBlob {
+  uint8_t data[::frisquet::kNetworkStoreSize];
 };
 
 // The transmit path (tx: read | ack) is compiled only when FRISQUET_TX_ENABLED is defined.
@@ -112,7 +118,17 @@ class FrisquetRadio : public Component {
     tx_level_ = level;
     dry_run_ = dry_run;
     association_ = association;
+    yaml_association_ = association;
   }
+  // YAML `pairing: true`: association confirmations may be transmitted.
+  void set_pairing_allowed(bool value) { pairing_allowed_ = value; }
+  // Pairing on the broadcast network (30 s, the boiler must be in pairing mode). False when it cannot start.
+  // Recovery only listens and changes the NetworkID; association also confirms and changes the association byte.
+  bool start_network_recovery();
+  bool start_association();
+  // Back to the YAML NetworkID and association, now and after reboots.
+  bool forget_network();
+
   // Emergency stop: nothing is transmitted while set. Safe to call at any time.
   void set_kill_switch(bool killed);
   bool kill_switch() const { return killed_; }
@@ -158,6 +174,14 @@ class FrisquetRadio : public Component {
   void publish_(SensorId id, float value);
   void publish_text_(TextId id, const char *value);
   void rearm_(const char *reason);
+  void pairing_step_(uint32_t now);
+  void apply_network_();
+  void publish_network_();
+  void save_network_(uint8_t association);
+  // True only when the radio really uses the installation's sync word and no pairing session runs.
+  bool on_installation_network_() const {
+    return !pairing_.active() && memcmp(applied_network_, active_network_, 4) == 0;
+  }
 #ifdef FRISQUET_TX_ENABLED
   void tx_step_(uint32_t now);
   void transmit_pending_();
@@ -169,7 +193,15 @@ class FrisquetRadio : public Component {
 
   uint8_t cs_{8}, irq_{14}, reset_{12}, busy_{13}, sck_{9}, miso_{11}, mosi_{10};
   bool fem_{false};
-  uint8_t network_id_[4]{0, 0, 0, 0};
+  uint8_t network_id_[4]{0, 0, 0, 0};       // from the YAML
+  uint8_t active_network_[4]{0, 0, 0, 0};   // the installation's network: YAML, or learned by pairing
+  uint8_t applied_network_[4]{0, 0, 0, 0};  // the sync word the radio currently uses
+  bool network_learned_{false};
+  uint8_t yaml_association_{0xFF};
+  bool pairing_allowed_{false};
+  ::frisquet::PairingSession pairing_;
+  int last_pairing_state_{-1};
+  ESPPreferenceObject network_pref_;
   float rx_bandwidth_{234.3f};
   bool lna_bypass_{false};
   uint8_t tx_level_{0};

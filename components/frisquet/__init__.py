@@ -30,6 +30,7 @@ CONF_NETWORK_ID = "network_id"
 CONF_BOARD = "board"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
 CONF_LNA_BYPASS = "lna_bypass"
+CONF_PAIRING = "pairing"
 
 BOARDS = {
     # Heltec WiFi LoRa 32 V4.3: SX1262 + KCT8103L front-end module.
@@ -136,6 +137,10 @@ TEXT_SENSORS = {
     "zone_program": text_sensor.text_sensor_schema(),
     # Zone 1 block: inconnu / restauré (non confirmé) / confirmé. Writes need "confirmé".
     "zone_block_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # Network in use: "05:D9:8D:C9 (YAML), association E3" or "(appris)" once pairing learned it.
+    "network": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # Last pairing session: listening, confirming, succeeded, failed, cancelled.
+    "pairing_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 
@@ -163,6 +168,8 @@ def _validate_tx(config):
             )
         if config[CONF_ASSOCIATION] == 0xFF:
             raise cv.Invalid("association 0xFF means 'not associated'")
+    elif config[CONF_PAIRING]:
+        raise cv.Invalid("pairing: true needs a transmit path (tx: read, ack or write)")
     return config
 
 
@@ -180,6 +187,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ASSOCIATION): cv.hex_uint8_t,
         cv.Optional(CONF_RX_BANDWIDTH, default=234.3): cv.one_of(*RX_BANDWIDTHS, float=True),
         cv.Optional(CONF_LNA_BYPASS, default=False): cv.boolean,
+        # Allows the association button to transmit its confirmation (it changes the NetworkID and the
+        # association byte). NetworkID recovery only listens and is always available.
+        cv.Optional(CONF_PAIRING, default=False): cv.boolean,
         **{cv.Optional(key): schema for key, schema in SENSORS.items()},
         **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
     }
@@ -217,6 +227,7 @@ async def to_code(config):
         cg.add_define("FRISQUET_TX_ENABLED")
         level = {"read": 1, "ack": 2, "write": 3}[config[CONF_TX]]
         cg.add(var.set_tx(level, config[CONF_DRY_RUN], config[CONF_ASSOCIATION]))
+        cg.add(var.set_pairing_allowed(config[CONF_PAIRING]))
 
     for index, key in enumerate(SENSORS):
         if key in config:

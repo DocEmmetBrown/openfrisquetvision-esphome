@@ -14,6 +14,7 @@
 #include "../../components/frisquet/proto_crc.h"
 #include "../../components/frisquet/proto_decode.h"
 #include "../../components/frisquet/proto_engine.h"
+#include "../../components/frisquet/proto_pairing.h"
 #include "../../components/frisquet/proto_schedule.h"
 #include "../../components/frisquet/proto_transaction.h"
 #include "../../components/frisquet/proto_txgate.h"
@@ -300,10 +301,11 @@ static void test_tx_gate() {
   build_read_request(frame, sizeof(frame), kIdConnect, 0xE3, 1, 0x79F2, 0);
   CHECK(evaluate_tx(p, frame, sizeof(frame)) == TxVerdict::kBlockedAddress);
 
-  // Anything else, even at the highest level: association frames, zone writes, other types.
+  // Anything else, even at the highest level: association frames other than an exact confirmation
+  // (see test_pairing), zone writes, other types.
   p.level = TxLevel::kWrite;
   const Bytes assoc = {0x7E, 0x80, 0xE3, 0x01, 0x01, 0x41, 0x00};
-  CHECK(evaluate_tx(p, assoc.data(), assoc.size()) == TxVerdict::kBlockedUnknownFrame);
+  CHECK(evaluate_tx(p, assoc.data(), assoc.size()) == TxVerdict::kMalformed);
   Bytes zone_write = relay;
   zone_write[0] = kIdBoiler;
   zone_write[1] = kIdConnect;
@@ -1411,6 +1413,171 @@ static void test_crc_valid_and_invalid() {
         frisquet::crc::Status::InvalidLength);
 }
 
+// Pairing: the offer format comes from OpenFrisquetVisio (no capture on this installation yet).
+static void test_pairing() {
+  using namespace frisquet;
+  const uint8_t home[4] = {0x05, 0xD9, 0x8D, 0xC9};
+  const Bytes offer = {0xFF, 0x80, 0xE7, 0x2A, 0x01, 0x41, 0x04, 0x12, 0x34, 0x56, 0x78};
+  const uint8_t learned[4] = {0x12, 0x34, 0x56, 0x78};
+
+  AssociationOffer o;
+  CHECK(decode_association_offer(offer.data(), offer.size(), o));
+  CHECK(o.association == 0xE7 && o.message_id == 0x2A && o.reception == 0x01);
+  CHECK(memcmp(o.network, learned, 4) == 0);
+  {
+    Bytes bad = offer;
+    bad[1] = 0x08;  // not from the boiler
+    CHECK(!decode_association_offer(bad.data(), bad.size(), o));
+    bad = offer;
+    bad[4] = 0x81;  // an answer, not an offer
+    CHECK(!decode_association_offer(bad.data(), bad.size(), o));
+    bad = offer;
+    bad[6] = 0x05;  // length byte
+    CHECK(!decode_association_offer(bad.data(), bad.size(), o));
+    bad = offer;
+    memset(bad.data() + 7, 0xFF, 4);  // the broadcast network is never an answer
+    CHECK(!decode_association_offer(bad.data(), bad.size(), o));
+    bad = offer;
+    memset(bad.data() + 7, 0x00, 4);
+    CHECK(!decode_association_offer(bad.data(), bad.size(), o));
+    bad = offer;
+    bad[2] = 0xFF;  // "not associated"
+    CHECK(!decode_association_offer(bad.data(), bad.size(), o));
+    CHECK(!decode_association_offer(offer.data(), offer.size() - 1, o));
+  }
+
+  uint8_t confirm[kAssociationConfirmLength];
+  CHECK(build_association_confirm(offer.data(), offer.size(), kIdConnect, confirm, sizeof(confirm)) == 10);
+  const Bytes expected_confirm = {0x80, 0x7E, 0xE7, 0x2A, 0x81, 0x41, 0x12, 0x34, 0x56, 0x78};
+  CHECK(Bytes(confirm, confirm + 10) == expected_confirm);
+  CHECK(build_association_confirm(offer.data(), offer.size(), kIdConnect, confirm, 9) == 0);
+
+  uint8_t out[16];
+  size_t length = 0;
+
+  // NetworkID recovery: broadcast while listening, the learned network afterwards, nothing transmitted.
+  {
+    PairingSession s;
+    CHECK(!s.start(PairingKind::kRecoverNetwork, kIdConnect, kBroadcastNetwork, 0));
+    CHECK(s.start(PairingKind::kRecoverNetwork, kIdConnect, home, 1000));
+    CHECK(!s.start(PairingKind::kRecoverNetwork, kIdConnect, home, 1000));  // one session at a time
+    CHECK(memcmp(s.network(), kBroadcastNetwork, 4) == 0);
+    const Bytes read_answer = {0x7E, 0x80, 0xE3, 0x13, 0x81, 0x03, 0x02, 0x00, 0x90};
+    CHECK(!s.on_frame(2000, read_answer.data(), read_answer.size()));
+    CHECK(s.on_frame(3000, offer.data(), offer.size()));
+    CHECK(s.state() == PairingState::kSucceeded);
+    CHECK(memcmp(s.network(), learned, 4) == 0);
+    CHECK(!s.poll(3001, out, length) && length == 0);
+    s.acknowledge();
+    CHECK(s.state() == PairingState::kIdle && memcmp(s.network(), learned, 4) == 0);
+  }
+  // Regression of the bug fixed in the MQTT firmware on 25/10: a failed listen must not stay on broadcast.
+  {
+    PairingSession s;
+    CHECK(s.start(PairingKind::kRecoverNetwork, kIdConnect, home, 1000));
+    CHECK(!s.poll(1000 + kPairingListenMs - 1, out, length));
+    CHECK(s.active());
+    CHECK(!s.poll(1000 + kPairingListenMs, out, length));
+    CHECK(s.state() == PairingState::kFailed);
+    CHECK(memcmp(s.network(), home, 4) == 0);
+    CHECK(!s.on_frame(1000 + kPairingListenMs + 1, offer.data(), offer.size()));  // too late
+    CHECK(memcmp(s.network(), home, 4) == 0);
+  }
+  {
+    PairingSession s;
+    CHECK(s.start(PairingKind::kRecoverNetwork, kIdConnect, home, 0xFFFFF000u));  // across the millis() wrap
+    CHECK(!s.poll(0x00000100u, out, length) && s.active());
+    s.cancel();
+    CHECK(s.state() == PairingState::kCancelled && memcmp(s.network(), home, 4) == 0);
+  }
+
+  // Association: confirm 10 times, 30 ms apart, still on broadcast; then the new network and association.
+  {
+    PairingSession s;
+    CHECK(s.start(PairingKind::kAssociate, kIdConnect, home, 0));
+    CHECK(s.on_frame(5000, offer.data(), offer.size()));
+    CHECK(s.state() == PairingState::kConfirming);
+    CHECK(memcmp(s.network(), kBroadcastNetwork, 4) == 0);
+    int sent = 0;
+    uint32_t t = 5000;
+    for (int i = 0; i < 40 && s.active(); ++i, t += 10) {
+      if (s.poll(t, out, length)) {
+        ++sent;
+        CHECK(length == 10 && Bytes(out, out + 10) == expected_confirm);
+        CHECK(!s.poll(t, out, length));  // never two in the same instant
+        if (s.active()) CHECK(memcmp(s.network(), kBroadcastNetwork, 4) == 0);
+      }
+    }
+    CHECK(sent == kAssociationConfirmRepeats);
+    CHECK(s.state() == PairingState::kSucceeded);
+    CHECK(memcmp(s.network(), learned, 4) == 0 && s.association() == 0xE7);
+    CHECK(s.offer_length() == offer.size());
+  }
+  // A radio that cannot confirm (emergency stop, nothing polled) gives the network back.
+  {
+    PairingSession s;
+    CHECK(s.start(PairingKind::kAssociate, kIdConnect, home, 0));
+    CHECK(s.on_frame(5000, offer.data(), offer.size()));
+    CHECK(!s.poll(10000, out, length));
+    CHECK(s.state() == PairingState::kFailed && memcmp(s.network(), home, 4) == 0);
+  }
+  {
+    PairingSession s;
+    CHECK(s.start(PairingKind::kAssociate, kIdConnect, home, 0));
+    CHECK(s.on_frame(5000, offer.data(), offer.size()));
+    CHECK(s.poll(5000, out, length));
+    s.cancel();
+    CHECK(s.state() == PairingState::kCancelled && memcmp(s.network(), home, 4) == 0);
+    CHECK(!s.poll(5100, out, length));
+  }
+
+  // Gate: only the exact confirmation of the received offer, only when pairing is allowed.
+  {
+    TxPolicy p;
+    p.level = TxLevel::kRead;
+    p.dry_run = false;
+    p.association = 0xE3;
+    TxClass cls;
+    CHECK(evaluate_tx(p, confirm, 10, offer.data(), offer.size(), &cls) == TxVerdict::kBlockedLevel);
+    CHECK(cls == TxClass::kAssociationConfirm);
+    p.pairing = true;
+    CHECK(evaluate_tx(p, confirm, 10, offer.data(), offer.size()) == TxVerdict::kSend);
+    CHECK(evaluate_tx(p, confirm, 10) == TxVerdict::kBlockedAddress);
+    Bytes other = offer;
+    other[10] = 0x79;
+    CHECK(evaluate_tx(p, confirm, 10, other.data(), other.size()) == TxVerdict::kBlockedAddress);
+    Bytes forged(confirm, confirm + 10);
+    forged[1] = 0x08;  // pretending to be the satellite
+    CHECK(evaluate_tx(p, forged.data(), forged.size(), offer.data(), offer.size()) == TxVerdict::kBlockedIdentity);
+    forged.assign(confirm, confirm + 10);
+    forged[4] = 0x01;  // not an answer
+    CHECK(evaluate_tx(p, forged.data(), forged.size(), offer.data(), offer.size()) == TxVerdict::kMalformed);
+    CHECK(evaluate_tx(p, offer.data(), offer.size(), offer.data(), offer.size()) == TxVerdict::kBlockedIdentity ||
+          evaluate_tx(p, offer.data(), offer.size(), offer.data(), offer.size()) == TxVerdict::kMalformed);
+    p.dry_run = true;
+    CHECK(evaluate_tx(p, confirm, 10, offer.data(), offer.size()) == TxVerdict::kDryRun);
+    p.kill_switch = true;
+    CHECK(evaluate_tx(p, confirm, 10, offer.data(), offer.size()) == TxVerdict::kBlockedKillSwitch);
+  }
+
+  // Persistence of the learned identity.
+  {
+    uint8_t blob[kNetworkStoreSize];
+    pack_network_store(learned, 0xE7, blob);
+    uint8_t network[4] = {};
+    uint8_t association = 0;
+    CHECK(unpack_network_store(blob, sizeof(blob), network, association));
+    CHECK(memcmp(network, learned, 4) == 0 && association == 0xE7);
+    pack_network_store(home, 0xFF, blob);
+    CHECK(unpack_network_store(blob, sizeof(blob), network, association) && association == 0xFF);
+    blob[6] ^= 0x01;
+    CHECK(!unpack_network_store(blob, sizeof(blob), network, association));
+    pack_network_store(kBroadcastNetwork, 0xE7, blob);
+    CHECK(!unpack_network_store(blob, sizeof(blob), network, association));
+    CHECK(!unpack_network_store(blob, sizeof(blob) - 1, network, association));
+  }
+}
+
 int main() {
   F = load_fixtures();
   test_header();
@@ -1440,6 +1607,7 @@ int main() {
   test_slot_schedule();
   test_crc_repair();
   test_crc_valid_and_invalid();
+  test_pairing();
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures ? 1 : 0;
 }

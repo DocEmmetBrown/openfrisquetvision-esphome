@@ -74,6 +74,11 @@ int16_t RawRadio::transmit_frame(const uint8_t *data, size_t length) {
 
 void FrisquetRadio::set_kill_switch(bool killed) {
   this->killed_ = killed;
+  // An association cannot complete without transmitting: give the network back now. A recovery only listens.
+  if (killed && this->pairing_.active() && this->pairing_.kind() == ::frisquet::PairingKind::kAssociate) {
+    ESP_LOGW(TAG, "Association cancelled by the emergency stop");
+    this->pairing_.cancel();
+  }
 #ifdef FRISQUET_TX_ENABLED
   this->engine_.set_kill_switch(killed);
 #endif
@@ -260,6 +265,172 @@ bool FrisquetRadio::request_zone_mode(const std::string &) { return false; }
 bool FrisquetRadio::request_zone_program(const std::string &) { return false; }
 #endif
 
+static std::string format_network(const uint8_t *n) {
+  char text[12];
+  snprintf(text, sizeof(text), "%02X:%02X:%02X:%02X", n[0], n[1], n[2], n[3]);
+  return text;
+}
+
+bool FrisquetRadio::start_network_recovery() {
+  if (this->radio_ == nullptr || this->is_failed()) return false;
+  if (!this->pairing_.start(::frisquet::PairingKind::kRecoverNetwork, ::frisquet::kIdConnect, this->active_network_,
+                            millis())) {
+    ESP_LOGW(TAG, "NetworkID recovery refused (a pairing session is already running)");
+    return false;
+  }
+  ESP_LOGI(TAG, "NetworkID recovery: listening on the broadcast network for %u s (boiler in pairing mode)",
+           static_cast<unsigned>(::frisquet::kPairingListenMs / 1000));
+#ifdef FRISQUET_TX_ENABLED
+  this->pending_tx_valid_ = false;
+#endif
+  this->apply_network_();
+  return true;
+}
+
+bool FrisquetRadio::start_association() {
+#ifdef FRISQUET_TX_ENABLED
+  if (this->radio_ == nullptr || this->is_failed()) return false;
+  if (!this->pairing_allowed_) {
+    ESP_LOGW(TAG, "Association refused: 'pairing: true' is not set in the YAML");
+    return false;
+  }
+  if (this->killed_) {
+    ESP_LOGW(TAG, "Association refused: the emergency stop is engaged");
+    return false;
+  }
+  if (!this->pairing_.start(::frisquet::PairingKind::kAssociate, ::frisquet::kIdConnect, this->active_network_,
+                            millis())) {
+    ESP_LOGW(TAG, "Association refused (a pairing session is already running)");
+    return false;
+  }
+  ESP_LOGI(TAG, "Association: listening on the broadcast network for %u s (boiler in pairing mode)",
+           static_cast<unsigned>(::frisquet::kPairingListenMs / 1000));
+  this->pending_tx_valid_ = false;
+  this->apply_network_();
+  return true;
+#else
+  ESP_LOGW(TAG, "Association needs a build with a transmit path (tx: read, ack or write)");
+  return false;
+#endif
+}
+
+bool FrisquetRadio::forget_network() {
+  if (this->pairing_.active()) {
+    ESP_LOGW(TAG, "Forget refused: a pairing session is running");
+    return false;
+  }
+  NetworkStoreBlob blob{};
+  this->network_pref_.save(&blob);  // all zeros: rejected by unpack_network_store()
+  global_preferences->sync();
+  memcpy(this->active_network_, this->network_id_, 4);
+  this->network_learned_ = false;
+#ifdef FRISQUET_TX_ENABLED
+  if (this->association_ != this->yaml_association_) {
+    this->association_ = this->yaml_association_;
+    ::frisquet::TxPolicy policy = this->engine_.policy();
+    policy.association = this->association_;
+    this->engine_.set_policy(policy);
+  }
+#endif
+  ESP_LOGI(TAG, "Learned network forgotten: back to the YAML NetworkID %s", format_network(this->network_id_).c_str());
+  this->apply_network_();
+  this->publish_network_();
+  return true;
+}
+
+void FrisquetRadio::apply_network_() {
+  const uint8_t *wanted = this->pairing_.active() ? this->pairing_.network() : this->active_network_;
+  if (memcmp(wanted, this->applied_network_, 4) == 0) return;
+  this->radio_->standby();
+  const int16_t state = this->radio_->setSyncWord(const_cast<uint8_t *>(wanted), 4);
+  if (state != RADIOLIB_ERR_NONE) {
+    // Leave applied_network_ unchanged: the next loop tries again.
+    ESP_LOGE(TAG, "setSyncWord(%s) failed: %d", format_network(wanted).c_str(), state);
+  } else {
+    memcpy(this->applied_network_, wanted, 4);
+    ESP_LOGI(TAG, "Radio network: %s", format_network(wanted).c_str());
+  }
+  this->rearm_("network change");
+}
+
+void FrisquetRadio::publish_network_() {
+  char text[48];
+  snprintf(text, sizeof(text), "%s (%s), association %02X", format_network(this->active_network_).c_str(),
+           this->network_learned_ ? "appris" : "YAML", this->association_);
+  this->publish_text_(kNetwork, text);
+}
+
+void FrisquetRadio::save_network_(uint8_t association) {
+  NetworkStoreBlob blob;
+  ::frisquet::pack_network_store(this->active_network_, association, blob.data);
+  // Written to flash now: the boiler already uses this identity, a power cut must not lose it.
+  if (!this->network_pref_.save(&blob) || !global_preferences->sync()) ESP_LOGW(TAG, "Saving the network failed");
+}
+
+void FrisquetRadio::pairing_step_(uint32_t now) {
+  if (this->pairing_.active()) {
+    uint8_t frame[::frisquet::kAssociationConfirmLength];
+    size_t length = 0;
+    if (this->pairing_.poll(now, frame, length) && length > 0) {
+#ifdef FRISQUET_TX_ENABLED
+      ::frisquet::TxPolicy policy = this->engine_.policy();
+      policy.pairing = this->pairing_allowed_;
+      const ::frisquet::TxVerdict verdict = ::frisquet::evaluate_tx(
+          policy, frame, length, this->pairing_.offer(), this->pairing_.offer_length());
+      ESP_LOGI(TAG, "TX %s association-confirm %s", ::frisquet::verdict_name(verdict),
+               format_hex_pretty(frame, length).c_str());
+      if (verdict == ::frisquet::TxVerdict::kSend) {
+        g_ignore_irq = true;
+        const int16_t state = this->radio_->transmit_frame(frame, length);
+        g_ignore_irq = false;
+        g_rx_flag = false;
+        if (state != RADIOLIB_ERR_NONE) ESP_LOGW(TAG, "transmit failed: %d", state);
+        this->rearm_("after association confirm");
+      } else {
+        // Dry run or refused: the boiler gets no confirmation, so nothing may change on our side either.
+        ESP_LOGW(TAG, "Association not confirmed (%s): staying on %s", ::frisquet::verdict_name(verdict),
+                 format_network(this->active_network_).c_str());
+        this->pairing_.cancel();
+      }
+#else
+      this->pairing_.cancel();
+#endif
+    }
+  }
+
+  const ::frisquet::PairingState state = this->pairing_.state();
+  if (state == ::frisquet::PairingState::kSucceeded) {
+    memcpy(this->active_network_, this->pairing_.network(), 4);
+    this->network_learned_ = true;
+    uint8_t stored_association = 0xFF;
+#ifdef FRISQUET_TX_ENABLED
+    if (this->pairing_.kind() == ::frisquet::PairingKind::kAssociate) {
+      this->association_ = this->pairing_.association();
+      stored_association = this->association_;
+      ::frisquet::TxPolicy policy = this->engine_.policy();
+      policy.association = this->association_;
+      this->engine_.set_policy(policy);
+    } else if (this->association_ != this->yaml_association_) {
+      stored_association = this->association_;  // keep a previously learned association
+    }
+#endif
+    this->save_network_(stored_association);
+    ESP_LOGI(TAG, "Pairing succeeded: NetworkID %s, association %02X", format_network(this->active_network_).c_str(),
+             this->association_);
+  }
+  this->apply_network_();
+  if (static_cast<int>(state) != this->last_pairing_state_ && state != ::frisquet::PairingState::kIdle) {
+    this->last_pairing_state_ = static_cast<int>(state);
+    ESP_LOGI(TAG, "Pairing: %s", ::frisquet::pairing_state_name(state));
+    this->publish_text_(kPairingState, ::frisquet::pairing_state_name(state));
+    if (!this->pairing_.active()) this->publish_network_();
+  }
+  if (!this->pairing_.active() && state != ::frisquet::PairingState::kIdle) {
+    this->pairing_.acknowledge();
+    this->last_pairing_state_ = -1;
+  }
+}
+
 void FrisquetRadio::setup() {
   if (this->fem_) {
     pinMode(FEM_POWER_PIN, OUTPUT);
@@ -300,12 +471,30 @@ void FrisquetRadio::setup() {
   state = this->radio_->setRxBandwidth(this->rx_bandwidth_);
   if (state != RADIOLIB_ERR_NONE) ESP_LOGW(TAG, "setRxBandwidth(%.1f) failed: %d", this->rx_bandwidth_, state);
   this->radio_->setPreambleLength(16);
-  state = this->radio_->setSyncWord(this->network_id_, 4);
+  memcpy(this->active_network_, this->network_id_, 4);
+  this->network_pref_ = global_preferences->make_preference<NetworkStoreBlob>(fnv1_hash("frisquet_network"));
+  {
+    NetworkStoreBlob blob;
+    uint8_t network[4];
+    uint8_t association = 0xFF;
+    if (this->network_pref_.load(&blob) &&
+        ::frisquet::unpack_network_store(blob.data, sizeof(blob.data), network, association)) {
+      memcpy(this->active_network_, network, 4);
+      this->network_learned_ = true;
+#ifdef FRISQUET_TX_ENABLED
+      if (association != 0xFF) this->association_ = association;
+#endif
+      ESP_LOGI(TAG, "Using the learned NetworkID %s (YAML: %s)", format_network(network).c_str(),
+               format_network(this->network_id_).c_str());
+    }
+  }
+  state = this->radio_->setSyncWord(this->active_network_, 4);
   if (state != RADIOLIB_ERR_NONE) {
     ESP_LOGE(TAG, "setSyncWord failed: %d", state);
     this->mark_failed();
     return;
   }
+  memcpy(this->applied_network_, this->active_network_, 4);
   this->radio_->setPacketReceivedAction(on_rx_irq);
 
 #ifdef FRISQUET_TX_ENABLED
@@ -325,6 +514,7 @@ void FrisquetRadio::setup() {
   this->restore_zone_blocks_();
 #endif
   this->rearm_("setup");
+  this->publish_network_();
 }
 
 void FrisquetRadio::rearm_(const char *reason) {
@@ -348,6 +538,7 @@ void FrisquetRadio::loop() {
     // Safety net against a lost interrupt or a chip that left RX.
     this->rearm_("watchdog");
   }
+  this->pairing_step_(millis());
 #ifdef FRISQUET_TX_ENABLED
   this->tx_step_(millis());
 #endif
@@ -372,6 +563,11 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
 void FrisquetRadio::tx_step_(uint32_t now) {
   this->sync_hot_water_();
   this->sync_zone_();
+  // On the broadcast network (or until the installation's sync word is applied again) nothing of ours goes out.
+  if (!this->on_installation_network_()) {
+    this->pending_tx_valid_ = false;
+    return;
+  }
   if (this->pending_tx_valid_) {
     if (static_cast<int32_t>(now - this->pending_tx_due_ms_) >= 0) this->transmit_pending_();
     return;
@@ -403,6 +599,10 @@ void FrisquetRadio::transmit_pending_() {
   // The kill switch can be engaged during the 30 ms wait: honour it right before transmitting.
   if (this->killed_) {
     ESP_LOGW(TAG, "TX cancelled by the kill switch");
+    return;
+  }
+  if (!this->on_installation_network_()) {
+    ESP_LOGW(TAG, "TX cancelled: the radio is not on the installation's network");
     return;
   }
   g_ignore_irq = true;
@@ -463,6 +663,12 @@ void FrisquetRadio::handle_packet_() {
   ::frisquet::parse_header(payload, result.length, header);
   ESP_LOGD(TAG, "RX %u bytes %02X->%02X type=%02X rssi=%.1f %s", static_cast<unsigned>(result.length),
            header.source, header.destination, header.type, rssi, format_hex_pretty(payload, result.length).c_str());
+  if (this->pairing_.active()) {
+    if (this->pairing_.on_frame(millis(), payload, result.length))
+      ESP_LOGI(TAG, "Association offer received: %s", format_hex_pretty(payload, result.length).c_str());
+    return;  // frames heard on the broadcast network are not the installation's traffic
+  }
+  if (!this->on_installation_network_()) return;
 
 #ifdef FRISQUET_TX_ENABLED
   // The engine sees every frame: relays to acknowledge, and the answers to its own reads.
@@ -640,8 +846,10 @@ void FrisquetRadio::dump_config() {
   ESP_LOGCONFIG(TAG, "Frisquet radio:");
   ESP_LOGCONFIG(TAG, "  Pins: CS=%u IRQ=%u RST=%u BUSY=%u SCK=%u MISO=%u MOSI=%u", this->cs_, this->irq_, this->reset_,
                 this->busy_, this->sck_, this->miso_, this->mosi_);
-  ESP_LOGCONFIG(TAG, "  Network ID: %02X:%02X:%02X:%02X", this->network_id_[0], this->network_id_[1],
-                this->network_id_[2], this->network_id_[3]);
+  ESP_LOGCONFIG(TAG, "  Network ID: %s (%s)", format_network(this->active_network_).c_str(),
+                this->network_learned_ ? "learned by pairing" : "YAML");
+  if (this->network_learned_) ESP_LOGCONFIG(TAG, "  YAML network ID: %s", format_network(this->network_id_).c_str());
+  ESP_LOGCONFIG(TAG, "  Association confirmations: %s", this->pairing_allowed_ ? "allowed" : "refused");
   ESP_LOGCONFIG(TAG, "  RX bandwidth: %.1f kHz", this->rx_bandwidth_);
   if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
 #ifdef FRISQUET_TX_ENABLED

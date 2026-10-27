@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "proto_encode.h"
+#include "proto_pairing.h"
 #include "proto_tracker.h"
 
 namespace frisquet {
@@ -25,7 +26,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm };
 
 // Which parts of a zone block a write may change; everything else must equal the last known block.
 constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
@@ -39,6 +40,7 @@ struct TxPolicy {
   uint8_t self_id = kIdConnect;
   uint8_t association = 0xFF;  // 0xFF = not associated: nothing may be sent
   uint8_t zone_write_mask = 0; // kZoneField* bits a zone write may change (0: zone writes refused)
+  bool pairing = false;        // association confirmations allowed (YAML `pairing: true`)
 };
 
 constexpr uint16_t kMaxReadWords = 0x40;
@@ -57,7 +59,8 @@ inline const char *verdict_name(TxVerdict v) {
 }
 
 // `relay` is the zone relay being acknowledged, when `frame` is an acknowledgement: the
-// acknowledgement must be exactly what build_zone_ack() derives from it.
+// acknowledgement must be exactly what build_zone_ack() derives from it. For an association
+// confirmation it is the boiler's offer, and the frame must be exactly build_association_confirm().
 inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_t length,
                              const uint8_t *relay = nullptr, size_t relay_length = 0,
                              TxClass *classified = nullptr, const uint8_t *zone_reference = nullptr) {
@@ -67,6 +70,21 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   Header header;
   if (!frame || !parse_header(frame, length, header)) return TxVerdict::kMalformed;
 
+  if (header.type == kAssociation) {
+    if (length != kAssociationConfirmLength || !header.is_ack()) return TxVerdict::kMalformed;
+    cls = TxClass::kAssociationConfirm;
+    if (classified) *classified = cls;
+    // The association byte is the one the offer gives, not ours: the exact match below checks it.
+    uint8_t expected[kAssociationConfirmLength];
+    if (header.source != policy.self_id || header.destination != kIdBoiler) return TxVerdict::kBlockedIdentity;
+    if (!relay ||
+        build_association_confirm(relay, relay_length, policy.self_id, expected, sizeof(expected)) !=
+            kAssociationConfirmLength ||
+        memcmp(expected, frame, kAssociationConfirmLength) != 0)
+      return TxVerdict::kBlockedAddress;
+    if (!policy.pairing) return TxVerdict::kBlockedLevel;
+    return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
+  }
   if (header.type == kRead && !header.is_ack()) {
     if (length != kReadRequestLength || header.reception != 0x01) return TxVerdict::kMalformed;
     cls = TxClass::kReadRequest;
