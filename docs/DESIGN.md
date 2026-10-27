@@ -385,7 +385,22 @@ Première écriture d'un **bloc de zone** émise par le firmware ESPHome (nombre
 - **Programme** : lundi 08:00-21:30 → 08:00-22:00 demandé à 18:08:49 ; l'utilisateur a constaté sur le satellite « 22:00 » : écriture acceptée.
   Non observé par les journaux : le flux de logs s'est arrêté à 18:10 et la carte a redémarré vers 18:25 (« Reboot request from api », sans
   commande de notre part ; à surveiller). Retour au firmware MQTT à 18:26 : aucune anomalie, ECS inchangé.
+  Explication probable (27/10) : `api:` sans `reboot_timeout`, donc le défaut d'ESPHome (redémarrage après 15 min sans client API) ;
+  la perte du flux à 18:10 et le redémarrage à ~18:25 sont espacés de 15 min, et la source enregistrée est bien `api`.
 - Le firmware MQTT ne connaît pas ce nouveau programme avant un prochain relais.
+
+### 10.11 Persistance des blocs de zone (construction et tests hôte, 27/10/2026)
+
+La chaudière refuse la lecture du bloc `0xA154` : le Connect garde donc le dernier bloc reçu, désormais sauvegardé dans les préférences
+ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connues, 3 blocs, CRC32 ; tout enregistrement invalide est ignoré).
+
+- Trois états par zone, publiés pour la zone 1 par le capteur texte `zone_block_state` : **inconnu**, **restauré (non confirmé)**, **confirmé**.
+- Au démarrage, un bloc restauré est affiché mais **n'autorise aucune écriture** (porte et demandes refusées tant qu'il n'est pas confirmé).
+- Confirmation : un relais de la chaudière, l'écho d'une écriture, ou la diffusion du satellite (toutes les 10 min) cohérente avec le bloc
+  (mode, consigne active, horloge). Une diffusion incohérente **efface** la copie (retour à « inconnu »). La vérification n'est que partielle :
+  une modification du programme ou d'une consigne inactive peut passer inaperçue.
+- Sauvegarde seulement quand le bloc change (relais nouveau, écriture vérifiée, copie effacée), pas à chaque répétition d'un relais.
+- Pas encore fait : validation sur la chaudière (redémarrage ⇒ « restauré », puis « confirmé » à la diffusion suivante, puis écriture), zones 2 et 3.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
