@@ -1,13 +1,13 @@
 # Resuming work (state at 28/10/2026 22:40)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.16); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.17); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.2-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.3-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF |
@@ -24,8 +24,8 @@ Roadmap (DESIGN §10):
 
 1. **Check the overnight run** (morning of 29/10): logs or API (`dev/ofv_api.py get "Radio" "Chaudière" "Zone 1"`):
    - the boiler shows no « anomalie avec Connect »; reads OK; relays acknowledged (« Radio accusés envoyés » > 0);
-   - zone 1 block: the saved copy is Auto, the satellite is Hors Gel since 27–28/10. Expect the stale copy to be discarded
-     at the first broadcast (« inconnu »), then relearned and « confirmé » at the next relay;
+   - zone 1 block: the stale Auto copy was discarded at 23:00 (« inconnu », see DESIGN 10.17); expect it to be relearned
+     and « confirmé » at the next relay (a change on the satellite triggers one);
    - Home Assistant stayed connected (added on 28/10 ~22:37 through the ESPHome integration, key = `api_key` of
      `dev/secrets.yaml`).
 2. **Decide which firmware stays the Connect**:
@@ -64,7 +64,7 @@ Files outside git (all in `build/`, gitignored):
 
 ```sh
 . dev/ofv-env.sh && .venv/bin/esphome compile dev/phase-2d-associate.yaml   # the config running on the board
-grep -c -a 0.7.2-phase-2d-associate dev/.esphome/build/frisquette/build/firmware.ota.bin   # must be > 0
+grep -c -a 0.7.3-phase-2d-associate dev/.esphome/build/frisquette/build/firmware.ota.bin   # must be > 0
 ```
 
 All dev configs share the device name `frisquette`, hence one build directory: always check the version string of the image

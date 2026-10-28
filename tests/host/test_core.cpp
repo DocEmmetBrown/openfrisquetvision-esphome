@@ -1214,6 +1214,28 @@ static void test_zone_mode() {
   CHECK(frisquet::decode_zone_mode(0x30).mode == frisquet::ZoneMode::kFrostProtection);
   CHECK(frisquet::decode_zone_mode(0x30).connect_compat);
   CHECK(frisquet::decode_zone_mode(0x77).mode == frisquet::ZoneMode::kUnknown);
+
+  // Hors gel set on the satellite (28/10 22:40 and 22:50): 0x14, without the 0x20 flag.
+  CHECK(frisquet::decode_zone_mode(0x14).mode == frisquet::ZoneMode::kFrostProtection);
+  CHECK(!frisquet::decode_zone_mode(0x14).connect_compat);
+  CHECK(frisquet::decode_zone_mode(0x11).mode == frisquet::ZoneMode::kFrostProtection);
+  CHECK(frisquet::select_mode_from_broadcast(0x14) == 0x08);
+  CHECK(frisquet::select_mode_from_broadcast(0x30) == 0x08);
+  CHECK(frisquet::select_mode_from_broadcast(0x25) == 0x05);
+  CHECK(frisquet::select_mode_from_broadcast(0x20) == 0x05);
+  CHECK(frisquet::select_mode_from_broadcast(0x23) == 0x05);  // a derogation belongs to Auto
+  CHECK(frisquet::select_mode_from_broadcast(0x05) == 0x05);
+  CHECK(frisquet::select_mode_from_broadcast(0x00) == 0x07);
+  CHECK(frisquet::select_mode_from_broadcast(0x01) == 0x06);
+  CHECK(frisquet::select_mode_from_broadcast(0x40) == 0);
+  // The block saved in Auto on 27/10 must be discarded by that broadcast (it stayed "restauré" on 28/10).
+  uint8_t block[frisquet::kZoneBlockSize] = {0x96, 0x78, 0x1E, 0x05, 0x21};
+  CHECK(frisquet::check_block_against_broadcast(block, 0x14, 8.0f, 3, 0x22, 0x50) ==
+        frisquet::BlockCheck::kInconsistent);
+  block[3] = 0x08;
+  block[4] = 0x10;
+  CHECK(frisquet::check_block_against_broadcast(block, 0x14, 8.0f, 3, 0x22, 0x50) ==
+        frisquet::BlockCheck::kConsistent);
 }
 
 static void test_activity() {

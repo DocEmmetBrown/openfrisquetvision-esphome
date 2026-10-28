@@ -75,7 +75,7 @@ jour de la semaine (1, 0 = dimanche), puis par zone (Z1, Z2, Z3 ; 10 octets chac
 - Mode : l'octet de mode de la diffusion est l'octet **options** du bloc de zone. Vérifié le 26/10/2026 : la zone restant en Auto
   (mode `05` du bloc), le passage du programme de confort à réduit fait passer les options de `25` à `20`. Donc `25` = **Auto, confort**
   et `20` = **Auto, réduit**. Anciennes valeurs de l'ancien firmware : `00` réduit permanent, `01` confort permanent, `02` dérogation réduit,
-  `03` dérogation confort, `04` réduit auto, `05` confort auto, `10` hors gel ; le bit `0x20` est un indicateur de compatibilité Connect.
+  `03` dérogation confort, `04` réduit auto, `05` confort auto, `10` hors gel (vu `14` le 28/10 : hors gel réglé sur le satellite, le bit `0x04` varie comme en Auto) ; le bit `0x20` est un indicateur de compatibilité Connect.
   *Vérifié aussi : le réduit **permanent** (satellite mis en Réduit à la main, 26/10 10:24) donne une diffusion `00` et un bloc de mode `07`,
   options `00`. `20` (Auto réduit) et `00` (réduit permanent) sont donc bien distincts. Après le retour au programme normal, le confort
   en Auto s'est affiché `21` (et non `25`) : le bit `0x04` dépend de ce que le Connect a écrit en dernier (il reprend les options que le

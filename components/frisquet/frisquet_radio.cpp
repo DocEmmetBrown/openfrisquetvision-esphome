@@ -202,6 +202,19 @@ void FrisquetRadio::sync_zone_() {
     ESP_LOGI(TAG, "Zone block write: %s", write_state_name(state));
     this->publish_text_(kZoneWrite, write_state_name(state));
   }
+  // The command select follows the zone block once it is confirmed; before that (unknown, or restored and maybe stale)
+  // it follows the mode the satellite itself broadcasts.
+  const bool block_confirmed = this->engine_.zone_block_confirmed(0);
+  const int select_mode = block_confirmed ? this->engine_.zone_block(0)[3] : this->broadcast_zone_mode_;
+  if (select_mode > 0 && select_mode != this->last_zone_mode_) {
+    this->last_zone_mode_ = select_mode;
+#ifdef USE_SELECT
+    if (this->zone_mode_select_ != nullptr) {
+      for (const ZoneModeName &entry : ZONE_MODES)
+        if (entry.mode == select_mode) this->zone_mode_select_->publish_state(entry.name);
+    }
+#endif
+  }
   if (!this->engine_.zone_block_known(0)) return;
   const uint8_t *block = this->engine_.zone_block(0);
   for (uint8_t field = 0; field < 3; ++field) {
@@ -210,15 +223,6 @@ void FrisquetRadio::sync_zone_() {
 #ifdef USE_NUMBER
     if (this->zone_numbers_[field] != nullptr)
       this->zone_numbers_[field]->publish_state(::frisquet::temperature8(block[field]));
-#endif
-  }
-  if (block[3] != this->last_zone_mode_) {
-    this->last_zone_mode_ = block[3];
-#ifdef USE_SELECT
-    if (this->zone_mode_select_ != nullptr) {
-      for (const ZoneModeName &entry : ZONE_MODES)
-        if (entry.mode == block[3]) this->zone_mode_select_->publish_state(entry.name);
-    }
 #endif
   }
   char hex[::frisquet::kProgramSize * 2 + 1];
@@ -813,6 +817,7 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
   this->engine_.clock().set_from_bcd(millis(), b.year, b.month, b.day, b.hour, b.minute, b.second);
   // A block restored after a reboot is confirmed (or discarded) by what the satellite itself reports.
   this->engine_.on_zone_broadcast(0, b.mode_raw[0], b.setpoint[0], b.weekday, b.hour, b.minute);
+  this->broadcast_zone_mode_ = ::frisquet::select_mode_from_broadcast(b.mode_raw[0]);
 #endif
   this->publish_activity_();
 }

@@ -472,6 +472,16 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - **Conséquence** : le firmware MQTT (`E3`) n'est plus le Connect de la chaudière ; y revenir exige de le réassocier
   (« Effacer » puis « Ajouter » Connect, bouton « Associer Connect » du portail). La carte reste sous ESPHome.
 
+### 10.17 Mode Hors gel affiché « Auto » (28/10/2026 22:54 – 23:00)
+
+- Signalé depuis HA : satellite en Hors gel, « Zone 1 mode (commande) » en Auto, « Zone 1 mode » « Inconnu ».
+- Causes : la diffusion porte `14` (hors gel + bit `0x04`, sans `0x20`), que le décodeur ne reconnaissait qu'en `10` exact ; la
+  vérification du bloc restauré (sauvegardé en Auto le 27/10) restait donc « non concluante » et le sélecteur montrait ce bloc périmé.
+- Corrections (`0.7.3`) : tout octet sans `0x20` portant `0x10` est Hors gel ; le sélecteur suit le bloc seulement s'il est
+  **confirmé**, sinon le mode diffusé par le satellite (`select_mode_from_broadcast`). Tests hôte (692 vérifications).
+- Vérifié à 23:00:08 : bloc périmé écarté (« inconnu »), « Zone 1 mode » = Hors gel, sélecteur = Hors Gel. Les écritures de zone
+  restent refusées jusqu'au prochain relais (une modification sur le satellite le provoque).
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

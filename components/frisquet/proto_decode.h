@@ -139,8 +139,26 @@ inline DecodedZoneMode decode_zone_mode(uint8_t raw) {
     else out.mode = (low & 0x01) ? ZoneMode::kComfortAuto : ZoneMode::kReducedAuto;
     return out;
   }
+  // Hors gel set on the satellite: 0x14 on 2026-10-28 (0x10 plus the 0x04 bit that also varies in Auto).
+  if (raw & 0x10) {
+    out.mode = ZoneMode::kFrostProtection;
+    return out;
+  }
   out.mode = zone_mode_direct(raw);
   return out;
+}
+
+// The zone block mode (05 Auto, 06 Confort, 07 Réduit, 08 Hors gel) a broadcast mode byte stands for; 0 when unknown.
+// Derogations belong to Auto.
+inline uint8_t select_mode_from_broadcast(uint8_t raw) {
+  const DecodedZoneMode decoded = decode_zone_mode(raw);
+  switch (decoded.mode) {
+    case ZoneMode::kFrostProtection: return 0x08;
+    case ZoneMode::kComfortPermanent: return 0x06;
+    case ZoneMode::kReducedPermanent: return 0x07;
+    case ZoneMode::kUnknown: return 0;
+    default: return 0x05;
+  }
 }
 
 // ----- Boiler → zone-1 satellite broadcast (type 0x17, 49 bytes, every 10 minutes) -----
