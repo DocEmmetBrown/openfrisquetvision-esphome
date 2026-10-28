@@ -1,0 +1,197 @@
+# Phase 2d, association réelle : comme phase-2d-pairing.yaml, avec pairing: true (le bouton d'association émet sa
+# confirmation ; l'octet d'association du Connect change, le firmware MQTT devra être réassocié).
+# WiFi fourni par l'environnement : OFV_WIFI_SSID / OFV_WIFI_PASSWORD.
+esphome:
+  name: frisquette
+  friendly_name: Frisquette
+  project:
+    name: openfrisquetvisio.esphome
+    version: "0.7.2-phase-2d-associate"
+  platformio_options:
+    board_build.flash_mode: qio
+    board_build.f_flash: 80000000L
+    board_build.f_cpu: 240000000L
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [frisquet]
+
+logger:
+  level: DEBUG
+
+wifi:
+  ssid: !env_var OFV_WIFI_SSID
+  password: !env_var OFV_WIFI_PASSWORD
+  reboot_timeout: 5min
+
+api:
+  # Runs unattended as the boiler's Connect: no reboot when no API client is connected.
+  reboot_timeout: 0s
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+debug:
+  update_interval: 30s
+
+frisquet:
+  board: heltec_v4_3
+  network_id: "05:D9:8D:C9"
+  tx: write
+  dry_run: false
+  association: 0xE3
+  pairing: true
+  acks_sent:
+    name: Radio accusés envoyés
+  hot_water_temperature:
+    name: Chaudière ECS
+  heating_body_temperature:
+    name: Chaudière corps de chauffe
+  flue_temperature:
+    name: Chaudière fumées
+  zone1_flow_temperature:
+    name: Zone 1 départ
+  zone1_flow_setpoint:
+    name: Zone 1 consigne de départ
+  pressure:
+    name: Chaudière pression
+  consumption_hot_water:
+    name: Consommation ECS
+  consumption_heating:
+    name: Consommation chauffage
+  annual_consumption_hot_water:
+    name: Consommation ECS année
+  annual_consumption_heating:
+    name: Consommation chauffage année
+  hot_water_mode:
+    name: Chaudière mode ECS (lecture)
+  hot_water_write:
+    name: Chaudière mode ECS écriture
+  zone_write:
+    name: Zone 1 écriture consignes
+  zone_program:
+    name: Zone 1 programme (lisible)
+  zone_block_state:
+    name: Zone 1 bloc mémorisé
+  network:
+    name: Radio réseau
+  pairing_state:
+    name: Radio association
+  boiler_activity:
+    name: Chaudière activité
+  reads_ok:
+    name: Radio lectures réussies
+  reads_failed:
+    name: Radio lectures échouées
+  tx_dry_runs:
+    name: Radio trames simulées
+  tx_blocked:
+    name: Radio trames bloquées
+  rx_bandwidth: 234.3
+  lna_bypass: false
+  zone1_ambient_temperature:
+    name: Zone 1 température ambiante
+  zone1_setpoint:
+    name: Zone 1 consigne
+  zone1_mode:
+    name: Zone 1 mode
+  boiler_state:
+    name: Chaudière état
+  boiler_clock:
+    name: Chaudière horloge
+  zone1_raw:
+    name: Zone 1 octets bruts
+  zone_block:
+    name: Zone dernier bloc de configuration
+  seconds_since_frame:
+    name: Radio âge dernière trame
+  rssi:
+    name: Radio RSSI
+    filters:
+      - throttle: 60s
+  frames_valid:
+    name: Radio trames valides
+    filters:
+      - throttle: 60s
+  frames_repaired:
+    name: Radio trames réparées
+    filters:
+      - throttle: 60s
+  frames_rejected:
+    name: Radio trames rejetées
+    filters:
+      - throttle: 60s
+
+select:
+  - platform: frisquet
+    name: Chaudière mode ECS
+  - platform: frisquet
+    type: zone1_mode
+    name: Zone 1 mode (commande)
+
+text:
+  - platform: frisquet
+    name: Zone 1 programme
+    mode: text
+
+number:
+  - platform: frisquet
+    type: zone1_comfort
+    name: Zone 1 consigne confort
+  - platform: frisquet
+    type: zone1_reduced
+    name: Zone 1 consigne réduit
+  - platform: frisquet
+    type: zone1_frost
+    name: Zone 1 consigne hors-gel
+
+button:
+  - platform: frisquet
+    type: recover_network
+    name: Radio récupérer le NetworkID
+  - platform: frisquet
+    type: associate
+    name: Radio associer le Connect
+  - platform: frisquet
+    type: forget_network
+    name: Radio oublier le réseau appris
+
+switch:
+  - platform: frisquet
+    name: Radio arrêt d'urgence
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: WiFi signal
+    update_interval: 60s
+  - platform: debug
+    free:
+      name: Heap libre
+    block:
+      name: Heap bloc max
+    loop_time:
+      name: Durée de boucle
+    cpu_frequency:
+      name: Fréquence CPU
+
+text_sensor:
+  - platform: debug
+    reset_reason:
+      name: Raison du dernier reset
+  - platform: version
+    name: ESPHome version

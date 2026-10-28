@@ -1413,10 +1413,35 @@ static void test_crc_valid_and_invalid() {
         frisquet::crc::Status::InvalidLength);
 }
 
-// Pairing: the offer format comes from OpenFrisquetVisio (no capture on this installation yet).
+// Pairing: synthetic frames below; the real exchange of 28/10 is checked first.
 static void test_pairing() {
   using namespace frisquet;
   const uint8_t home[4] = {0x05, 0xD9, 0x8D, 0xC9};
+  {
+    const Bytes &real_offer = F["payload_association_offer"];
+    const Bytes &real_confirm = F["payload_association_confirm"];
+    AssociationOffer r;
+    CHECK(decode_association_offer(real_offer.data(), real_offer.size(), r));
+    CHECK(r.destination == 0x00 && r.association == 0xD5 && r.message_id == 0xD4 && r.reception == 0x02);
+    CHECK(memcmp(r.network, home, 4) == 0);
+    uint8_t built[kAssociationConfirmLength];
+    CHECK(build_association_confirm(real_offer.data(), real_offer.size(), kIdConnect, built, sizeof(built)) == 10);
+    CHECK(Bytes(built, built + 10) == real_confirm);
+    TxPolicy p;
+    p.level = TxLevel::kRead;
+    p.dry_run = false;
+    p.association = 0xE3;  // the previous association: the confirmation carries the offer's byte
+    p.pairing = true;
+    CHECK(evaluate_tx(p, real_confirm.data(), real_confirm.size(), real_offer.data(), real_offer.size()) ==
+          TxVerdict::kSend);
+    PairingSession s;
+    CHECK(s.start(PairingKind::kAssociate, kIdConnect, home, 0));
+    CHECK(s.on_frame(100, real_offer.data(), real_offer.size()));
+    size_t n = 0;
+    uint8_t out[16];
+    for (uint32_t t = 100; s.active(); t += 30) s.poll(t, out, n);
+    CHECK(s.state() == PairingState::kSucceeded && s.association() == 0xD5 && memcmp(s.network(), home, 4) == 0);
+  }
   const Bytes offer = {0xFF, 0x80, 0xE7, 0x2A, 0x01, 0x41, 0x04, 0x12, 0x34, 0x56, 0x78};
   const uint8_t learned[4] = {0x12, 0x34, 0x56, 0x78};
 

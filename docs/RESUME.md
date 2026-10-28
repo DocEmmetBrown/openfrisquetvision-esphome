@@ -1,32 +1,40 @@
-# Resuming work (state at 27/10/2026 12:20)
+# Resuming work (state at 28/10/2026 22:40)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.15); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.16); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **MQTT firmware** `b1e6934` (portal version `26.10.24.1813`), MQTT connected, no boiler anomaly, ECS « Eco Horaires », zone 1 Auto 20,0 °C |
-| ESPHome preferences on the board | Kept across MQTT periods: zone 1 block saved at 11:47 (comfort 20,0 / reduced 17,0 / frost 8,0). **No learned network** (YAML `05:D9:8D:C9`, association `E3`) |
-| Git | branch `main`, everything committed, **nothing pushed**. Last commits: `a2f5ffc`, `6a5bfaf` (phase 2d), `ede498e`, `a599b71`, `ce6cae4` |
-| Host tests | `tests/host/run.sh` → 669 checks, 0 failures |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.2-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
+| MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
+| Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF |
+| Git | branch `main`, **nothing pushed** |
+| Host tests | `tests/host/run.sh` → 678 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
-- **Done on air**: R, 0, 1, 2a, 2b, **2c** (zone 1 setpoints, mode, programme; block persistence; write from a restored block).
-- **2d (pairing)**: code and host tests done; on air only the *timeout* path was checked (10.15). Zones 2/3: not testable (zone 1 only).
+- **Done on air**: R, 0, 1, 2a, 2b, 2c (zone 1 setpoints, mode, programme; block persistence), **2d** (NetworkID recovery
+  timeout path, real Connect association, persistence across reboot). Zones 2/3: not testable (zone 1 only).
 - **Not started**: 3 (satellites, outdoor probe), 4 (programme and overrides), 5 (finishing, CI, other boards, first tag).
 
 ## 2. Next steps
 
-1. **NetworkID recovery with a real offer** (listen only, safe): flash `dev/phase-2d-pairing.yaml`, the user puts the boiler in
-   pairing mode, press « Radio récupérer le NetworkID » within the same 30 s. Expect `Association offer received: …` in the logs,
-   `Pairing: succeeded`, sensor « Radio réseau » = `05:D9:8D:C9 (appris)` (same ID). Record the offer bytes in PROTOCOL.md and add
-   them to `tests/fixtures/frames.txt` + a test. Afterwards press « oublier » if the YAML should stay the reference.
-2. **Connect association** (only if the user wants it): needs `pairing: true` in the YAML. **It changes the Connect's association
-   byte**: the MQTT firmware (still `E3`) must then be re-associated before rolling back to it. Decide first.
-3. Then phase 3 (satellites / outdoor probe), or a long-running ESPHome trial (see the 15-minute API reboot below).
+1. **Check the overnight run** (morning of 29/10): logs or API (`dev/ofv_api.py get "Radio" "Chaudière" "Zone 1"`), boiler
+   shows no « anomalie avec Connect », reads OK, relays acknowledged, zone 1 block confirmed (it was saved as Auto, the satellite
+   is now Hors Gel: expect the stale copy to be discarded at the first broadcast, then relearned at the next relay).
+2. **Decide which firmware stays the Connect**:
+   - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
+     (which the boiler no longer accepts). Consider Home Assistant integration.
+   - MQTT: flash it, then on the boiler « Partenaires > Effacer > Connect », « Ajouter > Connect », and press the portal's
+     « Associer Connect » before the last OK (the offer comes ~7 s after it).
+3. Then phase 3 (satellites / outdoor probe).
+
+**Pairing procedure learned on 28/10**: with a Connect already paired, « Ajouter » answers « terminé » at once and sends nothing.
+Delete it first (« Effacer > Connect »), start the listen (« Radio associer le Connect »), then press the last OK: the offer
+arrives ~7 s later.
 
 ## 3. Procedures
 
@@ -66,7 +74,7 @@ curl -s -m300 -b $J -F "update=@/tmp/ofv.ota.bin;filename=firmware.bin" http://1
 **Read / act through the API**: `.venv/bin/python dev/ofv_api.py get "Radio réseau" "bloc mémorisé"`,
 `… set "Zone 1 consigne confort" 20.5`, `… press "Radio récupérer le NetworkID"`.
 
-**Rollback ESPHome → MQTT** (always at the end of a window):
+**Rollback ESPHome → MQTT** (since 28/10 the MQTT firmware is **not paired**: re-associate it right after, see §2):
 
 ```sh
 . dev/ofv-env.sh && .venv/bin/esphome upload dev/phase-2d-pairing.yaml --device 10.35.5.18 --file build/mqtt-b1e6934-heltec_V4_3.bin
@@ -101,8 +109,8 @@ cd $B && ~/.platformio/penv/bin/pio run --project-conf platformio.tmp.ini   # �
 
 ## 4. Things to remember
 
-- **API reboot**: ESPHome reboots after 15 min without an API client (`api:` has no `reboot_timeout`). Keep the log stream
-  connected during a window; for a long trial set `reboot_timeout: 0s` or connect Home Assistant.
+- **API reboot**: ESPHome reboots after 15 min without an API client when `api:` has no `reboot_timeout` (all configs except
+  `phase-2d-associate.yaml`, which sets `0s`). During a window with another config, keep the log stream connected.
 - **Zone block**: the boiler refuses to read `0xA154`. After a boot the block is « restauré », writes are refused until a relay
   or the satellite's broadcast (`08 80 FA`, irregular at ≈ −100 dBm, up to ~10 min) confirms it.
 - **Satellite slot**: writes were accepted at `:x4:37`, but on 27/10 one was echoed outside it (10.13): not a hard rule.

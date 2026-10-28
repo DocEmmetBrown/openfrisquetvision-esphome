@@ -65,3 +65,9 @@ payload_79f2_request = 80 7E E3 86 01 03 79 F2 00 1C
 # Real zone-1 block write captured on 2026-10-25 17:56:04 (Connect TX, id 0x80) and the boiler's echo at 17:57:01 (id 0x83)
 payload_zone_write = 80 7E E3 80 08 17 A1 54 00 18 A1 54 00 18 30 96 78 1E 05 25 00 00 00 F8 FF FF 0F 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 F8 FF FF 0F
 payload_zone_write_reply = 7E 80 E3 83 88 17 30 96 78 1E 05 25 00 00 00 F8 FF FF 0F 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 FF FF FF 07 00 00 F8 FF FF 0F
+
+# Connect association, 2026-10-28 22:29:38 (boiler: Partenaires > Effacer > Connect, then Ajouter > Connect).
+# Offer on the broadcast network FF:FF:FF:FF (destination 00, reception 02), and the confirmation the ESPHome
+# Connect sent 10 times; the boiler accepted it and answered reads with association D5 from 22:30:04.
+payload_association_offer = 00 80 D5 D4 02 41 04 05 D9 8D C9
+payload_association_confirm = 80 7E D5 D4 82 41 05 D9 8D C9

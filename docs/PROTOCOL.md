@@ -113,14 +113,19 @@ L'ancien firmware ne relit pas la valeur ; le nouveau la relit (`A0FC`) et ne d�
 - Le bloc **ne peut pas être lu** (`A154` renvoie une erreur de type `0x83`) : le Connect le connaît par les relais de la chaudière
   (et sa persistance). Une écriture part toujours du dernier bloc connu, où seuls les champs voulus changent.
 
-## Association (type 0x41, réseau de diffusion) *(non capturée : format repris d'OpenFrisquetVisio)*
+## Association (type 0x41, réseau de diffusion) *(capturée le 28/10/2026 22:29, association Connect)*
 
-Chaudière en mode association, sur le mot de synchronisation `FF:FF:FF:FF`, offre de 11 octets :
-`<dest> 80 <association> <id> <réception> 41 04 <NetworkID:4>`. Une **récupération du NetworkID** se contente d'écouter
-cette offre (30 s au plus). Une **association** répond, toujours sur le réseau de diffusion, 10 fois à 30 ms d'intervalle, par
-l'en-tête de réponse suivi du NetworkID, **sans octet de longueur** (10 octets) :
-`80 <soi> <association> <id> <réception|0x80> 41 <NetworkID:4>`, puis passe sur le NetworkID reçu et garde l'octet
-d'association de l'offre. Le destinataire de l'offre n'est pas vérifié (comme dans le firmware MQTT).
+Procédure côté chaudière : « Partenaires > Ajouter > Connect », jusqu'au dernier OK. **Tant qu'un Connect est déjà associé,
+la chaudière répond aussitôt « terminé » sans rien émettre** (deux écoutes de 30 s n'ont rien reçu) : il faut d'abord
+« Partenaires > Effacer > Connect », ce qui invalide l'association en cours.
+
+L'offre arrive ~7 s après l'appui, sur le mot de synchronisation `FF:FF:FF:FF`, en 11 octets :
+`<dest> 80 <association> <id> <réception> 41 04 <NetworkID:4>`, par exemple `00 80 D5 D4 02 41 04 05 D9 8D C9`
+(destinataire `00`, réception `02`, NetworkID de l'installation inchangé, **nouvel octet d'association `D5`**).
+Une **récupération du NetworkID** se contente d'écouter cette offre (30 s au plus). Une **association** répond, toujours sur le
+réseau de diffusion, 10 fois à 30 ms d'intervalle, par l'en-tête de réponse suivi du NetworkID, **sans octet de longueur**
+(10 octets) : `80 <soi> <association> <id> <réception|0x80> 41 <NetworkID:4>`, ici `80 7E D5 D4 82 41 05 D9 8D C9` ; la
+chaudière affiche alors OK et répond aux lectures avec la nouvelle association. Le destinataire de l'offre n'est pas vérifié.
 
 ## Créneaux (cycle de 10 minutes)
 

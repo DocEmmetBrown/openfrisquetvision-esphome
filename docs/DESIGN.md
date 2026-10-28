@@ -443,9 +443,8 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   utilisés au démarrage à la place du YAML ;
   bouton « oublier le réseau appris » pour revenir au YAML. Capteurs `network` et `pairing_state`.
 - Configuration `dev/phase-2d-pairing.yaml` (`pairing: false`) : seule la récupération (écoute) peut agir.
-- Pas encore fait : capture d'une offre réelle (chaudière en mode association) ; association sur l'air. **Attention** : associer
-  l'ESPHome change l'octet d'association du Connect ; le firmware MQTT de retour garderait l'ancien (`0xE3`) et devrait être
-  réassocié à son tour.
+- Capture d'une offre réelle et association sur l'air : faites le 28/10 (voir 10.16). Comme prévu, l'association a changé l'octet
+  du Connect (`E3` → `D5`) : le firmware MQTT doit être réassocié pour redevenir le Connect.
 
 ### 10.15 Fenêtre de récupération du NetworkID sans mode association du 27/10/2026 (12:06 – 12:10, `tx: write`, `pairing: false`)
 
@@ -456,6 +455,22 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   lectures 5/5, 0 trame bloquée. C'est le chemin du bug du 25/10, vérifié sur la carte.
 - Bouton « oublier » sans réseau appris : reste sur le YAML. Retour au firmware MQTT à 12:10 : aucune anomalie.
 - Reste : une offre réelle (chaudière en mode association) en récupération seule, puis, éventuellement, l'association.
+
+### 10.16 Fenêtre d'association du Connect du 28/10/2026 (22:21 – 22:35)
+
+- 22:21 : MQTT → ESPHome `0.7.0-phase-2d-pairing` (`pairing: false`). Zone 1 était passée en Hors Gel 8,0 depuis la veille (côté
+  satellite).
+- 22:22:49 et 22:24:50 : deux récupérations du NetworkID (écoute 30 s) pendant « Partenaires > Ajouter > Connect » : la chaudière
+  répond aussitôt « terminé », **rien reçu** sur `FF:FF:FF:FF`, retour sur `05:D9:8D:C9` à chaque fois ; l'association `E3` reste
+  valide (lectures 4/4 à 22:24). Cause : un Connect était déjà associé.
+- 22:28 : `0.7.1-phase-2d-associate` (`pairing: true`). L'utilisateur efface le Connect sur la chaudière puis relance « Ajouter ».
+- 22:29:31 : bouton « associer le Connect ». **22:29:38 : offre reçue** `00 80 D5 D4 02 41 04 05 D9 8D C9` (−99,5 dBm), 10 confirmations
+  `80 7E D5 D4 82 41 05 D9 8D C9` en 0,36 s (porte : `SEND`), réseau appris `05:D9:8D:C9` (identique), **association `D5`** sauvegardée.
+  La chaudière affiche OK. 22:30:04 : lectures 4/4 avec `D5`.
+- 22:33 : `0.7.2-phase-2d-associate` (identique + `api: reboot_timeout: 0s`, pour fonctionner sans client API) ; après le
+  redémarrage, réseau `appris` et association `D5` relus de la flash.
+- **Conséquence** : le firmware MQTT (`E3`) n'est plus le Connect de la chaudière ; y revenir exige de le réassocier
+  (« Effacer » puis « Ajouter » Connect, bouton « Associer Connect » du portail). La carte reste sous ESPHome.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
