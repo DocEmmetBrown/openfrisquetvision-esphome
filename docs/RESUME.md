@@ -22,19 +22,32 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-1. **Check the overnight run** (morning of 29/10): logs or API (`dev/ofv_api.py get "Radio" "Chaudière" "Zone 1"`), boiler
-   shows no « anomalie avec Connect », reads OK, relays acknowledged, zone 1 block confirmed (it was saved as Auto, the satellite
-   is now Hors Gel: expect the stale copy to be discarded at the first broadcast, then relearned at the next relay).
+1. **Check the overnight run** (morning of 29/10): logs or API (`dev/ofv_api.py get "Radio" "Chaudière" "Zone 1"`):
+   - the boiler shows no « anomalie avec Connect »; reads OK; relays acknowledged (« Radio accusés envoyés » > 0);
+   - zone 1 block: the saved copy is Auto, the satellite is Hors Gel since 27–28/10. Expect the stale copy to be discarded
+     at the first broadcast (« inconnu »), then relearned and « confirmé » at the next relay;
+   - Home Assistant stayed connected (added on 28/10 ~22:37 through the ESPHome integration, key = `api_key` of
+     `dev/secrets.yaml`).
 2. **Decide which firmware stays the Connect**:
    - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
-     (which the boiler no longer accepts). Consider Home Assistant integration.
+     (which the boiler no longer accepts); remove the old MQTT devices from Home Assistant.
    - MQTT: flash it, then on the boiler « Partenaires > Effacer > Connect », « Ajouter > Connect », and press the portal's
      « Associer Connect » before the last OK (the offer comes ~7 s after it).
-3. Then phase 3 (satellites / outdoor probe).
+3. **If ESPHome stays, tidy up**: one production config instead of the `dev/phase-*.yaml` ones, logger below DEBUG, choose the
+   exposed entities.
+4. **Phase 3**: physical satellite override, virtual satellite, outdoor probe (real or fed from HA).
+5. **Phase 4**: programme ownership (hybrid, decision D1) and persistent overrides; HA blueprint.
+6. **Phase 5**: dev tools, migration guide from the MQTT firmware, CI for the host tests, other boards (V3, LilyGo),
+   documentation, first tag.
+7. **Open decisions**: pushing the repository; the upstream licence question (D6).
+
+Zones 2 and 3 cannot be validated on air (this installation has zone 1 only).
 
 **Pairing procedure learned on 28/10**: with a Connect already paired, « Ajouter » answers « terminé » at once and sends nothing.
 Delete it first (« Effacer > Connect »), start the listen (« Radio associer le Connect »), then press the last OK: the offer
 arrives ~7 s later.
+
+**Logs of the test windows** (27–28/10) are kept in `build/logs/` (gitignored, no secrets).
 
 ## 3. Procedures
 
@@ -50,8 +63,8 @@ Files outside git (all in `build/`, gitignored):
 **Build an ESPHome image**
 
 ```sh
-. dev/ofv-env.sh && .venv/bin/esphome compile dev/phase-2d-pairing.yaml
-grep -c -a 0.7.0-phase-2d-pairing dev/.esphome/build/frisquette/build/firmware.ota.bin   # must be > 0
+. dev/ofv-env.sh && .venv/bin/esphome compile dev/phase-2d-associate.yaml   # the config running on the board
+grep -c -a 0.7.2-phase-2d-associate dev/.esphome/build/frisquette/build/firmware.ota.bin   # must be > 0
 ```
 
 All dev configs share the device name `frisquette`, hence one build directory: always check the version string of the image
