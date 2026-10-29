@@ -2,7 +2,7 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, text_sensor
+from esphome.components import binary_sensor, sensor, text_sensor
 from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_ENERGY,
@@ -18,6 +18,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["esp32"]
+AUTO_LOAD = ["binary_sensor"]
 CODEOWNERS = []
 
 frisquet_ns = cg.esphome_ns.namespace("frisquet_radio")
@@ -31,6 +32,8 @@ CONF_BOARD = "board"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
 CONF_LNA_BYPASS = "lna_bypass"
 CONF_PAIRING = "pairing"
+CONF_BURNER = "burner"
+DEVICE_CLASS_HEAT = "heat"
 
 BOARDS = {
     # Heltec WiFi LoRa 32 V4.3: SX1262 + KCT8103L front-end module.
@@ -190,6 +193,8 @@ CONFIG_SCHEMA = cv.All(
         # Allows the association button to transmit its confirmation (it changes the NetworkID and the
         # association byte). NetworkID recovery only listens and is always available.
         cv.Optional(CONF_PAIRING, default=False): cv.boolean,
+        # Burner on: flue temperature (0x79F2 read) above 40 C. About 120 C while firing, 0 when stopped.
+        cv.Optional(CONF_BURNER): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_HEAT),
         **{cv.Optional(key): schema for key, schema in SENSORS.items()},
         **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
     }
@@ -237,3 +242,6 @@ async def to_code(config):
         if key in config:
             sens = await text_sensor.new_text_sensor(config[key])
             cg.add(var.set_text_sensor(index, sens))
+    if CONF_BURNER in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_BURNER])
+        cg.add(var.set_burner_sensor(sens))

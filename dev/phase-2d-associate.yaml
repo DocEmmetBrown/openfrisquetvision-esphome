@@ -6,7 +6,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.3-phase-2d-associate"
+    version: "0.7.4-phase-2d-associate"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -61,6 +61,8 @@ frisquet:
     name: Chaudière corps de chauffe
   flue_temperature:
     name: Chaudière fumées
+  burner:
+    name: Chaudière brûleur
   zone1_flow_temperature:
     name: Zone 1 départ
   zone1_flow_setpoint:

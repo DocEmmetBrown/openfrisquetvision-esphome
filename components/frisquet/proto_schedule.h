@@ -4,6 +4,7 @@
 // Slots are derived from the boiler/NTP clock (or uptime before sync). Each slot gets at most
 // one attempt, even on failure: there is no catch-up burst. Nothing is sent in the quiet window
 // around the satellites' own slots (Z1 at :00, Z2 at :01, Z3 at :02, +/-30 s, every 10 minutes).
+#include <stddef.h>
 #include <stdint.h>
 
 namespace frisquet {
@@ -43,7 +44,9 @@ class SlotSchedule {
 };
 
 // Slots used by the active Connect (seconds into each 10-minute cycle, or into the hour).
-constexpr uint32_t kTemperatureOffsets[3] = {180, 360, 480};  // :03 :06 :08
+// Temperatures (0x79F2, which carries the flue temperature, i.e. the burner) every minute from :03 to :09.
+constexpr uint32_t kTemperatureOffsets[] = {180, 240, 300, 360, 420, 480, 540};
+constexpr size_t kTemperatureSlots = sizeof(kTemperatureOffsets) / sizeof(kTemperatureOffsets[0]);
 constexpr uint32_t kConsumptionPeriod = 3600;
 constexpr uint32_t kConsumptionOffset = 300;                  // :05 of each hour
 constexpr uint32_t kHotWaterModePeriod = 3600;

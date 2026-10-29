@@ -482,6 +482,18 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Vérifié à 23:00:08 : bloc périmé écarté (« inconnu »), « Zone 1 mode » = Hors gel, sélecteur = Hors Gel. Les écritures de zone
   restent refusées jusqu'au prochain relais (une modification sur le satellite le provoque).
 
+### 10.18 Brûleur et lectures chaque minute (29/10/2026 11:06 – 11:36)
+
+- Question : savoir quand le brûleur chauffe. Aucune trame spontanée : la flamme n'est qu'un témoin de la chaudière (le satellite
+  n'en affiche pas). Zone 1 repassée en Auto sur le satellite à 11:07 : échange satellite immédiat (hors cycle), bloc « confirmé ».
+- Mesures : fumées 0 °C à 11:07, 11:12, 11:15, puis **121,8 °C à 11:17:56** (départ 40,2 → 60,4 °C) ; octet d'état `0x20` à 11:07 et
+  11:10, **`0x28`** à 11:24:36. Les fumées sont l'indicateur du brûleur ; l'octet d'état le confirme mais toutes les 10 min seulement.
+- Retour en Hors gel depuis HA (`select`) : demandé 11:12:33, **vérifié à 11:24:35** (créneau `:x4:37`, celui de 11:14:37 n'a pas
+  pris) ; options normalisées en `10` par le satellite.
+- `0.7.4` : lecture `0x79F2` **chaque minute de :03 à :09** (7 par cycle de 10 min au lieu de 3 ; fenêtres satellites inchangées,
+  6 min sans lecture au plus) ; capteur binaire `burner` (« Chaudière brûleur », classe `heat`) = fumées > 40 °C. Vérifié :
+  lectures 8/8 à la minute, brûleur OFF en Hors gel. Tests hôte 704 vérifications.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

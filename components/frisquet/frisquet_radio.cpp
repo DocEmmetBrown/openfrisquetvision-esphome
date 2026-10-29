@@ -829,6 +829,8 @@ void FrisquetRadio::publish_info_(const ::frisquet::BoilerInfo &info) {
   this->publish_(kHeatingBody, info.heating_body);
   this->publish_(kOutdoor, info.outdoor);
   this->publish_(kFlue, info.flue);
+  if (this->burner_sensor_ != nullptr && !isnan(info.flue))
+    this->burner_sensor_->publish_state(::frisquet::burner_firing(info.flue));
   this->publish_(kZone1Flow, info.flow[0]);
   this->publish_(kZone1FlowSetpoint, info.flow_setpoint[0]);
   this->publish_(kPressure, info.pressure);

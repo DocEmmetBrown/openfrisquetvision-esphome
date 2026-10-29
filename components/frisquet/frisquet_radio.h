@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/component.h"
@@ -112,6 +113,7 @@ class FrisquetRadio : public Component {
   void set_lna_bypass(bool value) { lna_bypass_ = value; }
   void set_sensor(uint8_t id, sensor::Sensor *s) { if (id < kSensorCount) sensors_[id] = s; }
   void set_text_sensor(uint8_t id, text_sensor::TextSensor *s) { if (id < kTextCount) texts_[id] = s; }
+  void set_burner_sensor(binary_sensor::BinarySensor *s) { burner_sensor_ = s; }
 
   // tx_level: 1 = reads, 2 = reads and zone-relay acknowledgements.
   void set_tx(uint8_t level, bool dry_run, uint8_t association) {
@@ -252,6 +254,7 @@ class FrisquetRadio : public Component {
 
   sensor::Sensor *sensors_[kSensorCount]{};
   text_sensor::TextSensor *texts_[kTextCount]{};
+  binary_sensor::BinarySensor *burner_sensor_{nullptr};
 };
 
 }  // namespace frisquet_radio

@@ -117,6 +117,12 @@ static void test_boiler_info_flue_reported_while_firing() {
   CHECK(frisquet::decode_boiler_info(f.data(), f.size(), info));
   // The flue sensor is populated while the burner runs: 0x0999 / 10 / 2.
   CHECK_NEAR(info.flue, 122.85f, 0.01f);
+  CHECK(frisquet::burner_firing(info.flue));
+  frisquet::BoilerInfo idle;
+  CHECK(frisquet::decode_boiler_info(F["payload_79f2_idle"].data(), F["payload_79f2_idle"].size(), idle));
+  CHECK(!frisquet::burner_firing(idle.flue));
+  CHECK(!frisquet::burner_firing(18.0f));  // still warm just after a stop (27/10 11:09)
+  CHECK(!frisquet::burner_firing(NAN));
   CHECK_NEAR(info.hot_water, 64.4f, 0.001f);
   CHECK_NEAR(info.heating_body, 60.0f, 0.001f);
   CHECK_NEAR(info.flow[0], 46.5f, 0.001f);
@@ -557,10 +563,13 @@ static void test_engine_schedule_and_failure() {
   h.set_policy(engine_policy(TxLevel::kRead, true));
   h.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x18, 0x04, 0x55);  // 18:04:55
   CHECK(!h.poll(0, tx));
-  CHECK(h.poll(5000, tx) && be16(tx.frame + 6) == 0x7A18);   // 18:05:00
-  CHECK(h.poll(5100, tx) && be16(tx.frame + 6) == 0xA063);
-  CHECK(!h.poll(5200, tx));
-  CHECK(h.poll(125000, tx) && be16(tx.frame + 6) == 0xA0FC);  // 18:07:00
+  CHECK(h.poll(5000, tx) && be16(tx.frame + 6) == 0x79F2);   // 18:05:00, the minute's temperature read first
+  CHECK(h.poll(5100, tx) && be16(tx.frame + 6) == 0x7A18);
+  CHECK(h.poll(5200, tx) && be16(tx.frame + 6) == 0xA063);
+  CHECK(!h.poll(5300, tx));
+  CHECK(h.poll(65000, tx) && be16(tx.frame + 6) == 0x79F2);   // 18:06:00
+  CHECK(h.poll(125000, tx) && be16(tx.frame + 6) == 0x79F2);  // 18:07:00
+  CHECK(h.poll(125100, tx) && be16(tx.frame + 6) == 0xA0FC);
 
   // The clock switches from uptime to the boiler's date after a first attempt: the slots of the new
   // time base must still fire (regression from the dry run: :03 and :06 were skipped after the sync).
@@ -922,7 +931,8 @@ static void test_zone_write() {
       if (second++ == 0) second_id = tx.frame[3];
     }
   }
-  CHECK(second == 5 && second_id == 0x81);
+  // The :05 temperature read runs between the bursts (unanswered here: two attempts, ids 0x81 and 0x82).
+  CHECK(second == 4 && second_id == 0x83);
   CHECK(e.stats().zone_bursts == 2);
 
   // The boiler answers a send of the first burst (as seen on the air): the write is done, the block known.
@@ -957,7 +967,7 @@ static void test_zone_write() {
     if (g.poll(t, tx) && tx.kind == TxClass::kZoneAck) continue;
   }
   CHECK(g.zone_write_state() == WriteState::kFailed && g.stats().zone_writes_failed == 1);
-  CHECK(g.stats().zone_bursts >= 20);
+  CHECK(g.stats().zone_bursts >= 15);  // one temperature read a minute runs between the bursts
   CHECK(memcmp(g.zone_block(0), reference.data(), kZoneBlockSize) == 0);
 
   // Below the write level or in dry run: judged, never sent.

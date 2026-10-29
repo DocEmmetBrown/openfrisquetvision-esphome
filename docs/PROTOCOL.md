@@ -59,7 +59,7 @@ Mots de 16 bits big-endian signés. Températures en dixièmes de °C, **127,0 (
 | 22 | corps de chauffe | `03 0E` = 78,2 °C |
 | 24, 26, 28 | départ Z1, Z2, Z3 | `01 20` = 28,8 °C |
 | 30 | sonde de sécurité | `01 40` = 32,0 °C |
-| 32 | **fumées** (valeur brute / 2) | `00 00` à l'arrêt ; `09 99` = 122,85 °C brûleur allumé |
+| 32 | **fumées** (valeur brute / 2) : **indicateur du brûleur** | `00 00` à l'arrêt ; `09 99` = 122,85 °C brûleur allumé ; 121,8 °C le 29/10 11:17 |
 | 34, 36 | puissance ECS, puissance chauffage | **toujours 0** sur la chaudière observée, même brûleur allumé |
 | 38 | inconnu | 0 |
 | 40 | pression (÷ 5120, bar) | `1E 00` = 1,50 bar |
@@ -71,7 +71,7 @@ Mots de 16 bits big-endian signés. Températures en dixièmes de °C, **127,0 (
 jour de la semaine (1, 0 = dimanche), puis par zone (Z1, Z2, Z3 ; 10 octets chacune) : ambiante (2), consigne (2), inconnu (1),
 **mode (1)**, inconnu (4) — ces 4 octets semblent contenir température et consigne de départ *(non vérifié)*.
 
-- État chaudière : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 en fonctionnement (`0x28` en marche, `0x20` veille).
+- État chaudière : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 en fonctionnement (`0x28` en marche, `0x20` veille). Vu `0x28` le 29/10 à 11:24 brûleur allumé (fumées 121,8 °C à 11:17), mais mis à jour seulement à chaque échange du satellite (10 min, ou à une modification). **La chaudière n'émet aucune trame propre au démarrage ou à l'arrêt du brûleur** ; la flamme est un témoin local de la chaudière.
 - Mode : l'octet de mode de la diffusion est l'octet **options** du bloc de zone. Vérifié le 26/10/2026 : la zone restant en Auto
   (mode `05` du bloc), le passage du programme de confort à réduit fait passer les options de `25` à `20`. Donc `25` = **Auto, confort**
   et `20` = **Auto, réduit**. Anciennes valeurs de l'ancien firmware : `00` réduit permanent, `01` confort permanent, `02` dérogation réduit,

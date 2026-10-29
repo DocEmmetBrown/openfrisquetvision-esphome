@@ -81,6 +81,10 @@ inline BoilerState decode_boiler_state(uint8_t raw) {
   return state;
 }
 
+// Burner state from the flue temperature of a 0x79F2 answer: 121.8 C while firing (29/10 11:17), 0 when stopped.
+constexpr float kBurnerFlueThreshold = 40.0f;
+inline bool burner_firing(float flue) { return !isnan(flue) && flue > kBurnerFlueThreshold; }
+
 enum class Activity : uint8_t { kUnknown, kStandby, kHeating, kHotWater };
 
 // Same rule as the MQTT firmware: only the running flag and the radio operating mode count.

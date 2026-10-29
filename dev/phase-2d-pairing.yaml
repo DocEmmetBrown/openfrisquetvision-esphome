@@ -60,6 +60,8 @@ frisquet:
     name: Chaudière corps de chauffe
   flue_temperature:
     name: Chaudière fumées
+  burner:
+    name: Chaudière brûleur
   zone1_flow_temperature:
     name: Zone 1 départ
   zone1_flow_setpoint:

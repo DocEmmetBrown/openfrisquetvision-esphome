@@ -348,7 +348,7 @@ class ConnectEngine {
       hot_water_slot_.reset();
     }
     const uint32_t seconds = clock_.seconds(now_ms);
-    for (size_t i = 0; i < 3; ++i)
+    for (size_t i = 0; i < kTemperatureSlots; ++i)
       if (temperature_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kTemperatureOffsets[i]))
         enqueue_(ReadKind::kInfo);
     if (consumption_slot_.due(seconds, now_ms, kConsumptionPeriod, kConsumptionOffset)) {
@@ -427,7 +427,7 @@ class ConnectEngine {
   EngineStats stats_;
   ReadTransaction transaction_;
   ReadKind current_kind_ = ReadKind::kUnknown;
-  SlotSchedule temperature_slots_[3];
+  SlotSchedule temperature_slots_[kTemperatureSlots];
   SlotSchedule consumption_slot_;
   SlotSchedule hot_water_slot_;
   ReadKind queue_[kQueue] = {};
