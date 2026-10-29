@@ -35,20 +35,30 @@ Roadmap (DESIGN §10):
    next to the satellite); the RSSI of short frames is meaningless (read it per packet).
    Tools: `dev/ofv_frames.py` (frame inventory), `dev/ofv_scan.py --split` + `dev/ofv_memmap.py` (memory map),
    `dev/ofv_setpoints.sh` (chained zone writes, each verified), `dev/ofv_api.py get|set|select|text|press`.
-2. **Decide which firmware stays the Connect**:
+2. **Satellite tests with the user (planned for 30/10)**: the satellite runs on batteries and can be moved, no special functions.
+   Start a capture (`esphome logs … > build/logs/frisq-sat.log`), then:
+   - **Range**: bring the satellite next to the board and change a setting on it (it triggers an exchange at once). Look for
+     `08 -> 80` frames with `python3 dev/ofv_frames.py build/logs/frisq-sat.log`. Received → it was range; decode what it writes
+     at `A02F` (ambient, setpoint, mode). Still nothing → different bit rate / modulation / sync word.
+   - **Local changes**: +/− setpoint in Auto, derogation if the satellite offers one (and its end at the next transition),
+     programme edit on the satellite. Each: relay `08`, broadcast byte, HA entities; then back to Hors gel / original programme.
+   - **Ambient**: warm the satellite in a hand; read `A029` every minute (already scheduled from :03 to :09) to see when the
+     ambient is updated (only at :x0:08, or on change).
+   - **Satellite absent** (optional): batteries out 20–30 min; boiler reaction, `A029`, anomaly bit; check recovery.
+3. **Decide which firmware stays the Connect**:
    - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
      (which the boiler no longer accepts); remove the old MQTT devices from Home Assistant.
    - MQTT: flash it, then on the boiler « Partenaires > Effacer > Connect », « Ajouter > Connect », and press the portal's
      « Associer Connect » before the last OK (the offer comes ~7 s after it).
-3. **If ESPHome stays, tidy up**: one production config instead of the `dev/phase-*.yaml` ones, logger below DEBUG, choose the
+4. **If ESPHome stays, tidy up**: one production config instead of the `dev/phase-*.yaml` ones, logger below DEBUG, choose the
    exposed entities.
-4. **Phase 3** (needs the user's go-ahead: it changes the heating regulation): outdoor probe fed from HA (device `0x20`, to pair
+5. **Phase 3** (needs the user's go-ahead: it changes the heating regulation): outdoor probe fed from HA (device `0x20`, to pair
    on the boiler, writes `A029` every 10 min at `:x4`), or the zone ambient from an HA sensor (writes at `A02F`, as satellite `08`
    / association `FA`; the physical satellite rewrites it every 10 min).
-5. **Phase 4**: programme ownership (hybrid, decision D1) and persistent overrides; HA blueprint.
-6. **Phase 5**: dev tools, migration guide from the MQTT firmware, CI for the host tests, other boards (V3, LilyGo),
+6. **Phase 4**: programme ownership (hybrid, decision D1) and persistent overrides; HA blueprint.
+7. **Phase 5**: dev tools, migration guide from the MQTT firmware, CI for the host tests, other boards (V3, LilyGo),
    documentation, first tag.
-7. **Open decisions**: pushing the repository; the upstream licence question (D6).
+8. **Open decisions**: pushing the repository; the upstream licence question (D6).
 
 Zones 2 and 3 cannot be validated on air (this installation has zone 1 only).
 
