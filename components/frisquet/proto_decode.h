@@ -184,12 +184,8 @@ struct SatelliteBroadcast {
 
 constexpr size_t kSatelliteBroadcastLength = 49;
 
-inline bool decode_satellite_broadcast(const uint8_t *frame, size_t length, SatelliteBroadcast &out) {
-  Header header;
-  if (!parse_header(frame, length, header)) return false;
-  if (header.type != kInit || header.source != kIdBoiler || header.destination != kIdZone1) return false;
-  if (length != kSatelliteBroadcastLength || frame[6] != 0x2A) return false;
-  const uint8_t *d = frame + 7;
+// The 0x2A data bytes after the length byte, shared by the broadcast and the 0xA029 read answer.
+inline void decode_status_data(const uint8_t *d, SatelliteBroadcast &out) {
   out.outdoor = temperature16_or_nan(d + 0);
   out.year = d[4];
   out.month = d[5];
@@ -206,6 +202,24 @@ inline bool decode_satellite_broadcast(const uint8_t *frame, size_t length, Sate
     out.setpoint[z] = temperature16_or_nan(zone + 2);
     out.mode_raw[z] = zone[5];
   }
+}
+
+inline bool decode_satellite_broadcast(const uint8_t *frame, size_t length, SatelliteBroadcast &out) {
+  Header header;
+  if (!parse_header(frame, length, header)) return false;
+  if (header.type != kInit || header.source != kIdBoiler || header.destination != kIdZone1) return false;
+  if (length != kSatelliteBroadcastLength || frame[6] != 0x2A) return false;
+  decode_status_data(frame + 7, out);
+  return true;
+}
+
+// Answer to our read of 0xA029 (0x15 words): the same data the satellite receives, at any time we ask.
+inline bool decode_status_read(const uint8_t *frame, size_t length, SatelliteBroadcast &out) {
+  Header header;
+  if (!parse_header(frame, length, header)) return false;
+  if (header.type != kRead || !header.is_ack() || header.source != kIdBoiler) return false;
+  if (length != kSatelliteBroadcastLength || frame[6] != 0x2A) return false;
+  decode_status_data(frame + 7, out);
   return true;
 }
 

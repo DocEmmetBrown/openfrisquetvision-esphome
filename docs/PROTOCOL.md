@@ -132,7 +132,8 @@ chaudière affiche alors OK et répond aux lectures avec la nouvelle association
 | Instant | Émetteur | Action |
 |---|---|---|
 | `:00`, `:01`, `:02` (±30 s) | satellites Z1/Z2/Z3 | échanges propres aux satellites : **fenêtre silencieuse** pour le Connect |
-| chaque minute de `:03` à `:09` | Connect (cette carte, `0.7.4`) | lecture `0x79F2` (le firmware MQTT : `:03`, `:06`, `:08`) |
+| `:03`, `:08` (firmware MQTT : aussi `:06`) | Connect | lecture `0x79F2` (rafraîchie par la chaudière à `:x3` et `:x8` seulement) |
+| chaque minute de `:03` à `:09` | Connect (cette carte, `0.7.5+`) | lecture `0xA029` (état, horloge ; en direct) |
 | `:05` de l'heure | Connect | lecture `0x7A18` et `0xA063` |
 | `:07` de l'heure | Connect | lecture `0xA0FC` (mode ECS) |
 

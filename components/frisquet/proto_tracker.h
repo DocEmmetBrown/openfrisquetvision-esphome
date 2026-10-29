@@ -15,9 +15,10 @@ constexpr uint16_t kAddrConsumption = 0x7A18;    // daily consumption
 constexpr uint16_t kAddrAnnualConsumption = 0xA063;
 constexpr uint16_t kAddrHotWaterMode = 0xA0FC;
 constexpr uint16_t kAddrDate = 0xA02B;
+constexpr uint16_t kAddrStatus = 0xA029;         // what the satellite reads: outdoor, date, boiler state, zones
 constexpr uint16_t kAddrFamilyOffset = 0x00C8;
 
-enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate };
+enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate, kStatus, kExplore };
 
 inline ReadKind classify_read_address(uint16_t address) {
   switch (address) {
@@ -26,6 +27,7 @@ inline ReadKind classify_read_address(uint16_t address) {
     case kAddrAnnualConsumption: return ReadKind::kAnnualConsumption;
     case kAddrHotWaterMode: return ReadKind::kHotWaterMode;
     case kAddrDate: return ReadKind::kDate;
+    case kAddrStatus: return ReadKind::kStatus;
     default: break;
   }
   if (address >= kAddrFamilyOffset) return classify_read_address(static_cast<uint16_t>(address - kAddrFamilyOffset));

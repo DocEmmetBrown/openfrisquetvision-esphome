@@ -23,6 +23,17 @@ class ZoneProgramText : public text::Text, public Component {
   FrisquetRadio *parent_{nullptr};
 };
 
+// "ADDR WORDS" in hexadecimal: one exploratory read, logged as "EXPLORE ADDR+WORDS: <data>" or "no answer".
+class ExploreText : public text::Text, public Component {
+ public:
+  void set_parent(FrisquetRadio *parent) { parent_ = parent; }
+  void dump_config() override;
+
+ protected:
+  void control(const std::string &value) override;
+  FrisquetRadio *parent_{nullptr};
+};
+
 }  // namespace frisquet_radio
 }  // namespace esphome
 #endif

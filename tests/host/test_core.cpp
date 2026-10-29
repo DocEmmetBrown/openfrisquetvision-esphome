@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -486,7 +487,7 @@ static void test_engine_reads() {
   ConnectEngine e;
   e.set_policy(engine_policy(TxLevel::kRead, false));
   e.set_next_message_id(0x86);
-  e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);  // 7:03 into the cycle: not quiet
+  e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);  // 7:15 into the cycle: not quiet, no slot
   e.request_initial_reads();
   CHECK(e.poll(0, tx) && tx.verdict == TxVerdict::kSend && tx.kind == TxClass::kReadRequest);
   CHECK(tx.length == 10 && tx.frame[3] == 0x86 && be16(tx.frame + 6) == 0x79F2);
@@ -507,7 +508,7 @@ static void test_engine_reads() {
   // Dry run: every queued read is shown once, nothing is awaited.
   ConnectEngine dry;
   dry.set_policy(engine_policy(TxLevel::kRead, true));
-  dry.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  dry.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);
   dry.request_initial_reads();
   int shown = 0;
   for (int i = 0; i < 10; ++i)
@@ -520,7 +521,7 @@ static void test_engine_reads() {
   // Level none: reads are blocked and abandoned, not retried in a loop.
   ConnectEngine none;
   none.set_policy(engine_policy(TxLevel::kNone, false));
-  none.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  none.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);
   none.request_initial_reads();
   int blocked = 0;
   for (int i = 0; i < 10; ++i)
@@ -545,30 +546,33 @@ static void test_engine_schedule_and_failure() {
   CHECK(!q.poll(119000, tx));  // 2:29
   CHECK(q.poll(120000, tx) && be16(tx.frame + 6) == 0x79F2);  // 2:30: window over
 
-  // The :03 slot (180 s into the cycle) queues a temperature read, once.
+  // The :03 slot (180 s into the cycle) queues a temperature read and a state read, once.
   ConnectEngine s;
   s.set_policy(engine_policy(TxLevel::kRead, true));
   s.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x52, 0x55);  // 2:55 into the cycle
   CHECK(!s.poll(0, tx));
   CHECK(!s.poll(4000, tx));
   CHECK(s.poll(5000, tx) && be16(tx.frame + 6) == 0x79F2);  // 3:00
+  CHECK(s.poll(5100, tx) && be16(tx.frame + 6) == 0xA029 && be16(tx.frame + 8) == 0x15);
   CHECK(!s.poll(6000, tx) && !s.poll(8000, tx));
-  // :06 slot, then :08.
-  CHECK(s.poll(185000, tx) && be16(tx.frame + 6) == 0x79F2);
-  CHECK(s.poll(305000, tx) && be16(tx.frame + 6) == 0x79F2);
-  CHECK(s.stats().reads_started == 3);
+  // A state read every minute, the temperatures again at :08 only (the boiler refreshes them then).
+  CHECK(s.poll(65000, tx) && be16(tx.frame + 6) == 0xA029);   // :04
+  CHECK(!s.poll(65100, tx));
+  CHECK(s.poll(305000, tx) && be16(tx.frame + 6) == 0x79F2);  // :08
+  CHECK(s.poll(305100, tx) && be16(tx.frame + 6) == 0xA029);
+  CHECK(s.stats().reads_started == 5);
 
   // The hourly slots: :05 queues consumption then annual consumption, :07 the hot-water mode.
   ConnectEngine h;
   h.set_policy(engine_policy(TxLevel::kRead, true));
   h.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x18, 0x04, 0x55);  // 18:04:55
   CHECK(!h.poll(0, tx));
-  CHECK(h.poll(5000, tx) && be16(tx.frame + 6) == 0x79F2);   // 18:05:00, the minute's temperature read first
+  CHECK(h.poll(5000, tx) && be16(tx.frame + 6) == 0xA029);   // 18:05:00, the minute's state read first
   CHECK(h.poll(5100, tx) && be16(tx.frame + 6) == 0x7A18);
   CHECK(h.poll(5200, tx) && be16(tx.frame + 6) == 0xA063);
   CHECK(!h.poll(5300, tx));
-  CHECK(h.poll(65000, tx) && be16(tx.frame + 6) == 0x79F2);   // 18:06:00
-  CHECK(h.poll(125000, tx) && be16(tx.frame + 6) == 0x79F2);  // 18:07:00
+  CHECK(h.poll(65000, tx) && be16(tx.frame + 6) == 0xA029);   // 18:06:00
+  CHECK(h.poll(125000, tx) && be16(tx.frame + 6) == 0xA029);  // 18:07:00
   CHECK(h.poll(125100, tx) && be16(tx.frame + 6) == 0xA0FC);
 
   // The clock switches from uptime to the boiler's date after a first attempt: the slots of the new
@@ -577,18 +581,19 @@ static void test_engine_schedule_and_failure() {
   u.set_policy(engine_policy(TxLevel::kRead, true));
   CHECK(!u.poll(100000, tx));
   CHECK(u.poll(180000, tx) && be16(tx.frame + 6) == 0x79F2);  // uptime-based :03 slot, 180 s after boot
+  CHECK(u.poll(180100, tx) && be16(tx.frame + 6) == 0xA029);
   // The first broadcast arrives at 200 s: boiler time 12:12:30, so the :03 slot is 30 s away.
   u.clock().set_from_bcd(200000, 0x26, 0x10, 0x26, 0x12, 0x12, 0x30);
   CHECK(!u.poll(229000, tx));
   CHECK(u.poll(230000, tx) && be16(tx.frame + 6) == 0x79F2);  // 12:13:00
-  CHECK(u.poll(410000, tx) && be16(tx.frame + 6) == 0x79F2);  // 12:16:00 (:06)
+  CHECK(u.poll(230100, tx) && be16(tx.frame + 6) == 0xA029);
   CHECK(u.poll(530000, tx) && be16(tx.frame + 6) == 0x79F2);  // 12:18:00 (:08)
 
   // No answer: two attempts, 10 sends, the failure is counted and the id moves on by two.
   ConnectEngine f;
   f.set_policy(engine_policy(TxLevel::kRead, false));
   f.set_next_message_id(0x0A);
-  f.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  f.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);
   f.request_initial_reads();
   int sends = 0;
   uint32_t last_send_ms = 0;
@@ -606,7 +611,7 @@ static void test_engine_schedule_and_failure() {
   ConnectEngine a;
   a.set_policy(engine_policy(TxLevel::kAck, false));
   a.set_next_message_id(0x20);
-  a.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+  a.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);
   a.request_initial_reads();
   CHECK(a.poll(0, tx) && tx.kind == TxClass::kReadRequest);
   const Bytes &relay = F["payload_zone_block"];
@@ -700,7 +705,7 @@ static void test_engine_hot_water_write() {
   auto make_ready = [&](ConnectEngine &e, TxLevel level, bool dry_run) {
     e.set_policy(engine_policy(level, dry_run));
     e.set_next_message_id(0x86);
-    e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x03);
+    e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);
     e.request_initial_reads();
     const char *answers[4] = {"payload_79f2_idle", "payload_7a18", "payload_a063", "payload_a0fc"};
     for (int i = 0; i < 4; ++i) {
@@ -1200,6 +1205,81 @@ static void test_zone_store_and_restore() {
 }
 
 static void test_zone_mode() {
+  // Exploratory reads: any address, at most 0x1C words, only with `explore: true`.
+  {
+    using namespace frisquet;
+    uint8_t request[kReadRequestLength];
+    build_read_request(request, sizeof(request), kIdConnect, 0xD5, 1, 0x7A00, 0x1C);
+    TxPolicy p;
+    p.level = TxLevel::kRead;
+    p.dry_run = false;
+    p.association = 0xD5;
+    CHECK(evaluate_tx(p, request, sizeof(request)) == TxVerdict::kBlockedAddress);
+    p.explore_reads = true;
+    CHECK(evaluate_tx(p, request, sizeof(request)) == TxVerdict::kSend);
+    build_read_request(request, sizeof(request), kIdConnect, 0xD5, 1, 0x7A00, 0x1D);
+    CHECK(evaluate_tx(p, request, sizeof(request)) == TxVerdict::kBlockedAddress);
+    p.level = TxLevel::kNone;
+    build_read_request(request, sizeof(request), kIdConnect, 0xD5, 1, 0x7A00, 0x10);
+    CHECK(evaluate_tx(p, request, sizeof(request)) == TxVerdict::kBlockedLevel);
+
+    ReadResult result;
+    TxRequest tx;
+    ConnectEngine e;
+    TxPolicy ep = engine_policy(TxLevel::kRead, false);
+    ep.association = 0xD5;
+    e.set_policy(ep);
+    e.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);  // no slot due
+    CHECK(!e.request_explore_read(0x7A00, 0x10));  // not allowed by the policy
+    ep.explore_reads = true;
+    e.set_policy(ep);
+    CHECK(!e.request_explore_read(0x7A00, 0));
+    CHECK(!e.request_explore_read(0x7A00, 0x1D));
+    CHECK(e.request_explore_read(0x7A00, 0x02) && e.explore_pending());
+    CHECK(!e.request_explore_read(0x7B00, 0x02));  // one at a time
+    CHECK(e.poll(100, tx) && be16(tx.frame + 6) == 0x7A00 && be16(tx.frame + 8) == 0x02);
+    CHECK(tx.verdict == TxVerdict::kSend);
+    const Bytes answer = {0x7E, 0x80, 0xD5, tx.frame[3], 0x81, 0x03, 0x04, 0x12, 0x34, 0x56, 0x78};
+    CHECK(e.on_frame(200, answer.data(), answer.size(), result));
+    CHECK(result.kind == ReadKind::kExplore && result.address == 0x7A00 && result.length == answer.size());
+    CHECK(!e.explore_pending() && !e.take_explore_failed());
+
+    // Unanswered: reported once as failed.
+    CHECK(e.request_explore_read(0x7B00, 0x04));
+    for (uint32_t t = 300; t < 40000; t += 100) e.poll(t, tx);
+    CHECK(!e.explore_pending() && e.take_explore_failed() && !e.take_explore_failed());
+
+    // Dry run: nothing awaited, reported as failed.
+    ep.dry_run = true;
+    e.set_policy(ep);
+    CHECK(e.request_explore_read(0x7C00, 0x04));
+    CHECK(e.poll(50000, tx) && tx.verdict == TxVerdict::kDryRun);
+    CHECK(!e.explore_pending() && e.take_explore_failed());
+  }
+  // 0xA029 read answer: the broadcast data under a read-answer header (7E 80 <assoc> <id> 81 03 2A ...).
+  {
+    using namespace frisquet;
+    Bytes answer = F["payload_sat_broadcast_reduced"];
+    const Bytes header = {0x7E, 0x80, 0xD5, 0x42, 0x81, 0x03};
+    std::copy(header.begin(), header.end(), answer.begin());
+    SatelliteBroadcast from_read, from_broadcast;
+    CHECK(decode_status_read(answer.data(), answer.size(), from_read));
+    CHECK(decode_satellite_broadcast(F["payload_sat_broadcast_reduced"].data(),
+                                     F["payload_sat_broadcast_reduced"].size(), from_broadcast));
+    CHECK(from_read.state_raw == from_broadcast.state_raw && from_read.mode_raw[0] == from_broadcast.mode_raw[0]);
+    CHECK(from_read.minute == from_broadcast.minute && from_read.weekday == from_broadcast.weekday);
+    CHECK(!decode_satellite_broadcast(answer.data(), answer.size(), from_broadcast));
+    CHECK(!decode_status_read(F["payload_sat_broadcast_reduced"].data(), F["payload_sat_broadcast_reduced"].size(),
+                              from_read));
+    CHECK(classify_read_address(0xA029) == ReadKind::kStatus);
+    uint8_t request[kReadRequestLength];
+    build_read_request(request, sizeof(request), kIdConnect, 0xD5, 1, 0xA029, 0x15);
+    TxPolicy p;
+    p.level = TxLevel::kRead;
+    p.dry_run = false;
+    p.association = 0xD5;
+    CHECK(evaluate_tx(p, request, sizeof(request)) == TxVerdict::kSend);
+  }
   // 0x20 is Auto, reduced (verified: the satellite stayed in Auto while the programme went reduced).
   const Bytes &reduced = F["payload_sat_broadcast_reduced"];
   frisquet::SatelliteBroadcast b;

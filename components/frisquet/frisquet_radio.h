@@ -124,6 +124,9 @@ class FrisquetRadio : public Component {
   }
   // YAML `pairing: true`: association confirmations may be transmitted.
   void set_pairing_allowed(bool value) { pairing_allowed_ = value; }
+  void set_explore_allowed(bool value) { explore_allowed_ = value; }
+  // "ADDR WORDS" in hexadecimal, e.g. "7A00 1C": one exploratory read, logged as "EXPLORE 7A00+1C: ...".
+  bool request_explore_read(const std::string &request);
   // Pairing on the broadcast network (30 s, the boiler must be in pairing mode). False when it cannot start.
   // Recovery only listens and changes the NetworkID; association also confirms and changes the association byte.
   bool start_network_recovery();
@@ -201,6 +204,7 @@ class FrisquetRadio : public Component {
   bool network_learned_{false};
   uint8_t yaml_association_{0xFF};
   bool pairing_allowed_{false};
+  bool explore_allowed_{false};
   ::frisquet::PairingSession pairing_;
   int last_pairing_state_{-1};
   ESPPreferenceObject network_pref_;

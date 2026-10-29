@@ -494,6 +494,25 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   6 min sans lecture au plus) ; capteur binaire `burner` (« Chaudière brûleur », classe `heat`) = fumées > 40 °C. Vérifié :
   lectures 8/8 à la minute, brûleur OFF en Hors gel. Tests hôte 704 vérifications.
 
+### 10.19 Exploration de la mémoire pour un état du brûleur en direct (29/10/2026 15:04 – 16:05)
+
+- `0x79F2` n'est **pas** en direct : sur 158 lectures faites chaque minute, la réponse ne change qu'à :x3 (ambiante et consigne de
+  zone) et :x8 (températures de la chaudière, fumées). Un puisage d'eau chaude à 14:53 (flamme notée par l'utilisateur) tombe entre
+  deux relevés et passe inaperçu (fumées 0 °C ; seule la hausse du corps de chauffe et du départ à :x8 en garde la trace).
+  `0x79F2` revient donc à :03 et :08.
+- `0xA029` (21 mots, ce que lit le satellite) est **en direct** (horloge à la seconde) et lu chaque minute de :03 à :09 ; mais
+  son octet d'état reste `20` pendant une flamme d'eau chaude (15:23 – 15:24:30) : le bit `0x08` suit la demande de chauffage des
+  zones, pas le brûleur. Aucun autre octet ne bouge.
+- Outil (`0.7.6`) : option `explore: true`, entrée texte `type: explore` (« ADDR MOTS »), porte limitée à 0x1C mots et à cette
+  option, script `dev/ofv_scan.py` (résultats dans `build/logs/scan-*.jsonl`).
+- Balayage flamme éteinte : répondent `791C` (`FA00 FA08 D57E FFFF…`, table d'associations ?), `7938` (configuration ?), `79E0`,
+  `79FC`, `7A18`, `7A34` (`FFFF…`), `A038`, `A054`, `A070` ; rien dans `9C00 – 9CFF`. **Un bloc partiellement invalide est
+  entièrement refusé** (`A01C` et `A0FC` muets en 0x1C mots) : la cartographie doit se faire plus finement.
+- Flamme d'eau chaude 15:44:58 – 15:46:31 avec lecture toutes les ~11 s : `79E0` (instantané pris vers :x2) et `79FC` (vers :x8)
+  ne bougent pas pendant la flamme ; `79FC` change à 15:47:39 (après), fumées toujours 0.
+- Reste : réponse « pas de réponse » plus rapide pour l'exploration (1 essai, ~2 s) et découpage automatique des blocs refusés,
+  puis comparaison flamme éteinte / allumée. Le capteur « Chaudière brûleur » n'est fiable qu'à l'instant du relevé de :x8.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

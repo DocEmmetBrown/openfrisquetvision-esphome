@@ -6,7 +6,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.4-phase-2d-associate"
+    version: "0.7.6-phase-2d-associate"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -53,6 +53,7 @@ frisquet:
   dry_run: false
   association: 0xE3
   pairing: true
+  explore: true
   acks_sent:
     name: Radio accusés envoyés
   hot_water_temperature:
@@ -147,6 +148,11 @@ text:
   - platform: frisquet
     name: Zone 1 programme
     mode: text
+  - platform: frisquet
+    type: explore
+    name: Radio lecture exploratoire
+    mode: text
+    entity_category: config
 
 number:
   - platform: frisquet

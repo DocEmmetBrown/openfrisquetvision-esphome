@@ -42,6 +42,7 @@ struct TxRequest {
 
 struct ReadResult {
   ReadKind kind = ReadKind::kUnknown;
+  uint16_t address = 0;  // set for exploratory reads
   uint8_t frame[64] = {};
   size_t length = 0;
 };
@@ -209,6 +210,10 @@ class ConnectEngine {
         return false;
       }
       result.kind = current_kind_;
+      if (current_kind_ == ReadKind::kExplore) {
+        result.address = explore_address_;
+        explore_pending_ = false;
+      }
       result.length = transaction_.answer_length();
       memcpy(result.frame, transaction_.answer(), result.length);
       ++stats_.reads_ok;
@@ -271,6 +276,7 @@ class ConnectEngine {
         ++stats_.writes_failed;
       } else {
         ++stats_.reads_failed;
+        end_explore_failed_();
         if (write_state_ == WriteState::kAcked) {
           // The read-back itself failed: the write stays unverified.
           write_state_ = WriteState::kFailed;
@@ -291,6 +297,7 @@ class ConnectEngine {
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
+      if (!writing_ && !zone_writing_) end_explore_failed_();
       if (writing_) {
         writing_ = false;
         write_state_ = WriteState::kNotSent;
@@ -302,6 +309,7 @@ class ConnectEngine {
       transaction_.abort();
     } else if (tx.verdict != TxVerdict::kSend) {
       ++stats_.blocked;
+      if (!writing_ && !zone_writing_) end_explore_failed_();
       if (writing_) {
         writing_ = false;
         write_state_ = WriteState::kNotSent;
@@ -317,8 +325,33 @@ class ConnectEngine {
 
   bool reading() const { return transaction_.active(); }
 
+  // One exploratory read at a time, of any address, when the policy allows it (YAML `explore: true`).
+  bool request_explore_read(uint16_t address, uint16_t words) {
+    if (!policy_.explore_reads || words == 0 || words > kMaxExploreWords || explore_pending_) return false;
+    explore_address_ = address;
+    explore_words_ = words;
+    explore_pending_ = true;
+    enqueue_(ReadKind::kExplore);
+    return true;
+  }
+  bool explore_pending() const { return explore_pending_; }
+  // True once after an exploratory read ended without an answer (unanswered, blocked or dry run).
+  bool take_explore_failed() {
+    const bool failed = explore_failed_;
+    explore_failed_ = false;
+    return failed;
+  }
+  uint16_t explore_address() const { return explore_address_; }
+  uint16_t explore_words() const { return explore_words_; }
+
  private:
   static constexpr size_t kQueue = 8;
+
+  void end_explore_failed_() {
+    if (current_kind_ != ReadKind::kExplore || !explore_pending_) return;
+    explore_pending_ = false;
+    explore_failed_ = true;
+  }
 
   void enqueue_(ReadKind kind) {
     for (size_t i = 0; i < queue_length_; ++i)
@@ -344,6 +377,7 @@ class ConnectEngine {
     if (clock_.known() && !clock_was_known_) {
       clock_was_known_ = true;
       for (SlotSchedule &slot : temperature_slots_) slot.reset();
+      for (SlotSchedule &slot : status_slots_) slot.reset();
       consumption_slot_.reset();
       hot_water_slot_.reset();
     }
@@ -351,6 +385,8 @@ class ConnectEngine {
     for (size_t i = 0; i < kTemperatureSlots; ++i)
       if (temperature_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kTemperatureOffsets[i]))
         enqueue_(ReadKind::kInfo);
+    for (size_t i = 0; i < kStatusSlots; ++i)
+      if (status_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kStatusOffsets[i])) enqueue_(ReadKind::kStatus);
     if (consumption_slot_.due(seconds, now_ms, kConsumptionPeriod, kConsumptionOffset)) {
       enqueue_(ReadKind::kConsumption);
       enqueue_(ReadKind::kAnnualConsumption);
@@ -397,6 +433,8 @@ class ConnectEngine {
       case ReadKind::kConsumption: address = kAddrConsumption; words = 0x1C; break;
       case ReadKind::kAnnualConsumption: address = kAddrAnnualConsumption; words = 0x18; break;
       case ReadKind::kHotWaterMode: address = kAddrHotWaterMode; words = 0x01; break;
+      case ReadKind::kStatus: address = kAddrStatus; words = 0x15; break;
+      case ReadKind::kExplore: address = explore_address_; words = explore_words_; break;
       default: return false;
     }
     current_kind_ = kind;
@@ -427,7 +465,12 @@ class ConnectEngine {
   EngineStats stats_;
   ReadTransaction transaction_;
   ReadKind current_kind_ = ReadKind::kUnknown;
+  uint16_t explore_address_ = 0;
+  uint16_t explore_words_ = 0;
+  bool explore_pending_ = false;
+  bool explore_failed_ = false;
   SlotSchedule temperature_slots_[kTemperatureSlots];
+  SlotSchedule status_slots_[kStatusSlots];
   SlotSchedule consumption_slot_;
   SlotSchedule hot_water_slot_;
   ReadKind queue_[kQueue] = {};

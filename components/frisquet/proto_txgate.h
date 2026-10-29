@@ -41,9 +41,12 @@ struct TxPolicy {
   uint8_t association = 0xFF;  // 0xFF = not associated: nothing may be sent
   uint8_t zone_write_mask = 0; // kZoneField* bits a zone write may change (0: zone writes refused)
   bool pairing = false;        // association confirmations allowed (YAML `pairing: true`)
+  bool explore_reads = false;  // reads of addresses outside the whitelist allowed (YAML `explore: true`)
 };
 
 constexpr uint16_t kMaxReadWords = 0x40;
+// An answer holds at most 63 bytes: header, length byte and 0x1C words.
+constexpr uint16_t kMaxExploreWords = 0x1C;
 
 inline const char *verdict_name(TxVerdict v) {
   switch (v) {
@@ -108,7 +111,8 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   if (cls == TxClass::kReadRequest) {
     const uint16_t address = be16(frame + 6);
     const uint16_t words = be16(frame + 8);
-    if (classify_read_address(address) == ReadKind::kUnknown || words == 0 || words > kMaxReadWords)
+    if (words == 0 || words > kMaxReadWords) return TxVerdict::kBlockedAddress;
+    if (classify_read_address(address) == ReadKind::kUnknown && !(policy.explore_reads && words <= kMaxExploreWords))
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kRead) return TxVerdict::kBlockedLevel;
   } else if (cls == TxClass::kZoneWrite) {

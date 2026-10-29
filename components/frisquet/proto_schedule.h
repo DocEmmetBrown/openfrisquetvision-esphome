@@ -44,9 +44,13 @@ class SlotSchedule {
 };
 
 // Slots used by the active Connect (seconds into each 10-minute cycle, or into the hour).
-// Temperatures (0x79F2, which carries the flue temperature, i.e. the burner) every minute from :03 to :09.
-constexpr uint32_t kTemperatureOffsets[] = {180, 240, 300, 360, 420, 480, 540};
+// 0x79F2 at :03 and :08: the boiler refreshes it only then (zone values at both, its own temperatures and the flue
+// at :08 only; measured on 2026-10-29, 41 changes in 158 reads made every minute).
+constexpr uint32_t kTemperatureOffsets[] = {180, 480};
 constexpr size_t kTemperatureSlots = sizeof(kTemperatureOffsets) / sizeof(kTemperatureOffsets[0]);
+// 0xA029 (boiler state byte, clock) every minute from :03 to :09.
+constexpr uint32_t kStatusOffsets[] = {180, 240, 300, 360, 420, 480, 540};
+constexpr size_t kStatusSlots = sizeof(kStatusOffsets) / sizeof(kStatusOffsets[0]);
 constexpr uint32_t kConsumptionPeriod = 3600;
 constexpr uint32_t kConsumptionOffset = 300;                  // :05 of each hour
 constexpr uint32_t kHotWaterModePeriod = 3600;

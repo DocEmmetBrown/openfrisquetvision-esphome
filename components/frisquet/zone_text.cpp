@@ -20,6 +20,13 @@ void ZoneProgramText::control(const std::string &value) {
 
 void ZoneProgramText::dump_config() { LOG_TEXT("", "Frisquet zone programme", this); }
 
+void ExploreText::control(const std::string &value) {
+  if (this->parent_ != nullptr) this->parent_->request_explore_read(value);
+  this->publish_state(value);
+}
+
+void ExploreText::dump_config() { LOG_TEXT("", "Frisquet exploratory read", this); }
+
 }  // namespace frisquet_radio
 }  // namespace esphome
 #endif

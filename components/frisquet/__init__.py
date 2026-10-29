@@ -32,6 +32,7 @@ CONF_BOARD = "board"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
 CONF_LNA_BYPASS = "lna_bypass"
 CONF_PAIRING = "pairing"
+CONF_EXPLORE = "explore"
 CONF_BURNER = "burner"
 DEVICE_CLASS_HEAT = "heat"
 
@@ -171,8 +172,8 @@ def _validate_tx(config):
             )
         if config[CONF_ASSOCIATION] == 0xFF:
             raise cv.Invalid("association 0xFF means 'not associated'")
-    elif config[CONF_PAIRING]:
-        raise cv.Invalid("pairing: true needs a transmit path (tx: read, ack or write)")
+    elif config[CONF_PAIRING] or config[CONF_EXPLORE]:
+        raise cv.Invalid("pairing and explore need a transmit path (tx: read, ack or write)")
     return config
 
 
@@ -193,6 +194,8 @@ CONFIG_SCHEMA = cv.All(
         # Allows the association button to transmit its confirmation (it changes the NetworkID and the
         # association byte). NetworkID recovery only listens and is always available.
         cv.Optional(CONF_PAIRING, default=False): cv.boolean,
+        # Allows exploratory reads of any address (text entity of type `explore`), to map the boiler's memory.
+        cv.Optional(CONF_EXPLORE, default=False): cv.boolean,
         # Burner on: flue temperature (0x79F2 read) above 40 C. About 120 C while firing, 0 when stopped.
         cv.Optional(CONF_BURNER): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_HEAT),
         **{cv.Optional(key): schema for key, schema in SENSORS.items()},
@@ -233,6 +236,7 @@ async def to_code(config):
         level = {"read": 1, "ack": 2, "write": 3}[config[CONF_TX]]
         cg.add(var.set_tx(level, config[CONF_DRY_RUN], config[CONF_ASSOCIATION]))
         cg.add(var.set_pairing_allowed(config[CONF_PAIRING]))
+        cg.add(var.set_explore_allowed(config[CONF_EXPLORE]))
 
     for index, key in enumerate(SENSORS):
         if key in config:

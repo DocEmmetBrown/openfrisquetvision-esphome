@@ -275,6 +275,25 @@ static std::string format_network(const uint8_t *n) {
   return text;
 }
 
+bool FrisquetRadio::request_explore_read(const std::string &request) {
+#ifdef FRISQUET_TX_ENABLED
+  unsigned address = 0, words = 0;
+  if (sscanf(request.c_str(), "%x %x", &address, &words) != 2 || address > 0xFFFF) {
+    ESP_LOGW(TAG, "EXPLORE request '%s' refused: expected 'ADDR WORDS' in hexadecimal", request.c_str());
+    return false;
+  }
+  if (!this->engine_.request_explore_read(static_cast<uint16_t>(address), static_cast<uint16_t>(words))) {
+    ESP_LOGW(TAG, "EXPLORE %04X+%02X refused (explore: false, words not 1..1C, or one already pending)", address,
+             words);
+    return false;
+  }
+  ESP_LOGI(TAG, "EXPLORE %04X+%02X queued", address, words);
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool FrisquetRadio::start_network_recovery() {
   if (this->radio_ == nullptr || this->is_failed()) return false;
   if (!this->pairing_.start(::frisquet::PairingKind::kRecoverNetwork, ::frisquet::kIdConnect, this->active_network_,
@@ -510,6 +529,7 @@ void FrisquetRadio::setup() {
   policy.kill_switch = this->killed_;
   policy.self_id = ::frisquet::kIdConnect;
   policy.association = this->association_;
+  policy.explore_reads = this->explore_allowed_;
   if (this->tx_level_ >= 3)
     policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints | ::frisquet::kZoneFieldMode | ::frisquet::kZoneFieldProgram;
   this->engine_.set_policy(policy);
@@ -567,6 +587,8 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
 void FrisquetRadio::tx_step_(uint32_t now) {
   this->sync_hot_water_();
   this->sync_zone_();
+  if (this->engine_.take_explore_failed())
+    ESP_LOGI(TAG, "EXPLORE %04X+%02X: no answer", this->engine_.explore_address(), this->engine_.explore_words());
   // On the broadcast network (or until the installation's sync word is applied again) nothing of ours goes out.
   if (!this->on_installation_network_()) {
     this->pending_tx_valid_ = false;
@@ -760,6 +782,27 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
           default: break;
         }
         this->publish_text_(kHotWaterMode, name);
+      }
+      break;
+    }
+    case ::frisquet::ReadKind::kExplore: {
+      // Header (6), length byte, data: only the data is logged.
+      const size_t data = length > 7 ? length - 7 : 0;
+      ESP_LOGI(TAG, "EXPLORE %04X+%02X: %s", this->engine_.explore_address(), this->engine_.explore_words(),
+               format_hex(frame + 7, data).c_str());
+      break;
+    }
+    case ::frisquet::ReadKind::kStatus: {
+      ::frisquet::SatelliteBroadcast status;
+      if (::frisquet::decode_status_read(frame, length, status)) {
+        // Exploration (29/10): is this state byte live, unlike the 10-minute broadcast?
+        ESP_LOGI(TAG, "Status A029: state=%02X mode=%02X clock %02X:%02X:%02X", status.state_raw, status.mode_raw[0],
+                 status.hour, status.minute, status.second);
+        this->boiler_state_ = ::frisquet::decode_boiler_state(status.state_raw);
+        this->state_known_ = true;
+        this->publish_text_(kBoilerState, this->boiler_state_.fault ? "Anomalie"
+                                          : (this->boiler_state_.running ? "En marche" : "Veille"));
+        this->publish_activity_();
       }
       break;
     }
