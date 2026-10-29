@@ -1,7 +1,7 @@
 # Resuming work (state at 29/10/2026 16:55)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.20); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.21); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Where things stand
 

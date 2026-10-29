@@ -150,6 +150,12 @@ Toutes les trames reçues pendant une séance où le Connect a changé le mode E
 
 Rien d'autre : pas de trame liée au brûleur, aux puisages d'eau chaude ou aux changements de température.
 
+**Consignes** (séance du 29/10/2026 16:53 – 17:34, zone en Hors gel ; confort, réduit, hors-gel modifiés de +0,5 °C puis rétablis) :
+chaque écriture ne change que son octet du bloc (`(t − 5) × 10` : `96`→`9B` = 20,0→20,5 ; `78`→`7D` = 17,0→17,5 ; `1E`→`23` = 8,0→8,5),
+l'écho (`88`) et la réponse d'état au satellite (`81`) suivent aussitôt. La consigne diffusée est la **consigne active** (mot de
+dixièmes, `00 50` = 8,0 °C, `00 55` = 8,5 °C) : seule la consigne hors-gel l'a changée. **Le satellite ne renvoie son bloc au Connect
+(relais `08`, puis notre accusé relayé `FE`) que lorsque sa consigne active change** ; pour une consigne inactive, l'écho suffit.
+
 ## Créneaux (cycle de 10 minutes)
 
 | Instant | Émetteur | Action |

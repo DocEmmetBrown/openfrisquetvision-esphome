@@ -526,6 +526,14 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   « −100 dBm » des trames courtes est un artefact de la capture à 68 octets ; les trames émises **par le satellite** ne sont jamais
   reçues (cause inconnue).
 
+### 10.21 Consignes confort, réduit et hors-gel (29/10/2026 16:53 – 17:34)
+
+- Script `dev/ofv_setpoints.sh` : écritures en chaîne, chacune vérifiée avant la suivante. Confort 20,0 → 20,5, réduit 17,0 → 17,5,
+  hors-gel 8,0 → 8,5, puis retour 8,0 / 17,0 / 20,0 : **6 sur 6 vérifiées** (entre 1 min 40 et 9 min 40 chacune), 228 trames
+  d'écriture, 0 bloquée. État final identique à l'état initial (Hors gel, 8,0 °C, bloc confirmé).
+- Seul l'octet visé change ; la consigne active diffusée ne suit que le hors-gel (zone en Hors gel) ; le satellite ne relaie son
+  bloc au Connect que pour un changement de sa consigne active (voir PROTOCOL.md).
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
