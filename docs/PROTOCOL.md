@@ -102,6 +102,40 @@ L'octet de mode est le mode (bits `0x7E` :
 actuelle (`0x90` = `0x80` + Eco Horaires sur cette installation). La chaudière répond dans la seconde par un accusé INIT
 (`7E 80 E3 1C 81 17 02 00 88`, 9 octets : réception `0x81`, type `0x17`, et la **nouvelle valeur** `00 88` relue).
 L'ancien firmware ne relit pas la valeur ; le nouveau la relit (`A0FC`) et ne déclare l'écriture réussie que si elle correspond.
+**Les six modes vérifiés le 29/10/2026** (écrits puis relus à l'identique) : Max `80`, Eco `88`, Eco Horaires `90`, Eco+ `98`,
+Eco+ Horaires `A0`, Stop `A8`.
+
+## Dérogations et programme (vérifiés le 29/10/2026)
+
+- **Dérogation** = mode Auto (`05`) avec options `0x04 | 0x02 | confort` (`0x01`), comme le firmware MQTT (`Zone::setMode`) :
+  Dérogation Réduit `…06` (diffusée `26`), Dérogation Confort `…07` (diffusée `27`). Choisir Auto efface le bit `0x02`.
+- **Une dérogation sans effet est ignorée** : Dérogation Confort demandée en période de confort → écho `88` reçu, mais aucun relais
+  et la diffusion reste inchangée. **L'écho de la chaudière ne prouve donc pas que le satellite applique la valeur** : seuls le relais
+  du bloc (`08`) ou la diffusion suivante le montrent. En période réduite, la même demande est appliquée (`27`, consigne 20,0 °C).
+- **Programme** (42 octets, 7 jours × 6, dimanche d'abord, bit = demi-heure, 1 = confort) : une journée entièrement en confort (`FF…`,
+  minuit compris), entièrement en réduit (`00…`) et deux plages dans la journée sont acceptés ; en Auto, la diffusion suit aussitôt
+  le nouveau programme (Auto réduit `24` puis Auto confort `21` quand on rétablit une plage de confort en cours).
+
+## Carte mémoire (lectures `0x03`, balayage mot à mot du 29/10/2026, `dev/ofv_scan.py --split`, `dev/ofv_memmap.py`)
+
+Une lecture est **refusée en entier** dès qu'un de ses mots est invalide (réponse de type `0x83`, 7 octets). Lisibles dans
+`7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF` (352 mots), rien ailleurs dans ces plages :
+
+| Plage | Contenu (interprétation) |
+|---|---|
+| `7919 – 7965` | `791A – 791B` NetworkID `05D9 8DC9` ; `791C…` **table des associations** (`FA00`, `FA08` satellite Z1, `D57E` Connect, `FFFF` libres) ; `793A` identifiant `AE80 66D3` ; `793E – 7956` paramètres par circuit (`4B08 143C`, `4B0F 1450`… : bornes de départ ?) |
+| `79E0 – 7A4F` | deux **instantanés** de même structure (`79E0`, rafraîchi vers `:x2` ; `79FC`, vers `:x8`) : ECS, corps de chauffe, départs, fumées… ; `79F2` (ambiantes, consignes, extérieure) ; `7A18` (consommations aux mots 9 et 10, toujours nulles ici) |
+| `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure **en direct**, état et jour, NetworkID, `0080` (lu par la sonde extérieure) |
+| `A029 – A09B` | `A029` : **état en direct** (extérieure, date, état, zones ; voir la diffusion) ; `A041` : copie décalée ; `A05D` `00C6 0329` (80,9 °C : une consigne ?) ; `A063 – A09A` consommations annuelles (nulles) |
+| `A0F0 – A104` | `A0F8` identifiant `AE80 66D3` ; `A0FC` **mode ECS** |
+
+## Échanges des autres appareils (d'après le firmware MQTT, non captés ici)
+
+Un échange `0x17` lit une plage et en écrit une autre : `<lu : adresse, taille> <écrit : adresse, taille> <données>`.
+- **Satellite** zone N : lit `A029 x15` (la « diffusion » est sa réponse), écrit `A02F + 5 × (N − 1)` : 1 mot (ambiante) ou 4 mots
+  (ambiante, consigne, mode).
+- **Sonde extérieure** (`0x20`, association propre, à faire sur la chaudière) : toutes les 10 min à `:x4`, lit `9C54 x4` (date) et
+  écrit `A029 x1` (température extérieure ; `050A` = absente).
 
 ## Écriture d'un bloc de zone (type 0x17, 63 octets) *(capturée le 25/10/2026 17:56 – 17:59)*
 

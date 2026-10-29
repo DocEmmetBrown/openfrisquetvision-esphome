@@ -534,6 +534,22 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Seul l'octet visé change ; la consigne active diffusée ne suit que le hors-gel (zone en Hors gel) ; le satellite ne relaie son
   bloc au Connect que pour un changement de sa consigne active (voir PROTOCOL.md).
 
+### 10.22 Tests à distance du 29/10/2026 au soir (17:50 – 22:25)
+
+- **Modes ECS** : les 6 modes écrits et relus (Max `80` … Stop `A8`), retour Eco Horaires.
+- **Lectures** : `A07B` et `A063` (consommations annuelles) nulles ; `A02B` = horloge en direct (`A029` décalée).
+- **Refus `0x83`** (`0.7.8`) : une lecture refusée finit aussitôt (~0,7 s au lieu de 22 s) ; tests hôte.
+- **Carte mémoire** : balayage mot à mot de `7800 – 7BFF`, `9C00 – 9DFF`, `A000 – A2FF` (~3 500 lectures) : 5 plages lisibles, 352 mots
+  (PROTOCOL.md, « Carte mémoire »). Reste à les relire en boucle pendant une flamme pour trouver un état du brûleur en direct.
+- **Dérogations** (`0.7.9`, sélecteur « Dérogation Confort / Réduit ») : Dérogation Réduit appliquée (`26`) ; Dérogation Confort
+  ignorée en période de confort malgré l'écho, appliquée en période réduite (`27`, 20,0 °C) ; Auto l'annule.
+- **Programme** : dimanche tout confort, samedi tout réduit, jeudi en deux plages : acceptés et suivis par la diffusion ; programme
+  d'origine rétabli (19:04:42) puis **Hors gel** (19:14:43), état final identique à l'initial.
+- **Réception du satellite** : bande RX portée à 467 kHz (`0.7.9-bw467`) : toujours aucune trame du satellite, ni rejetée ; ce n'est
+  pas un décalage de fréquence. Revenu à 234,3 kHz (`0.7.10`). À tester sur place (carte près du satellite).
+- **Phase 3** (étude du firmware MQTT) : sonde extérieure = appareil `0x20` à associer sur la chaudière, écrit `A029` toutes les 10 min ;
+  satellite virtuel = écritures en `A02F`. Les deux modifient la régulation : rien d'émis sans accord.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

@@ -1,42 +1,40 @@
-# Resuming work (state at 29/10/2026 16:55)
+# Resuming work (state at 29/10/2026 22:30)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.21); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.22); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.7-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.10-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes 20,0 / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 731 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 752 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
-- **Done on air**: R, 0, 1, 2a, 2b, 2c (zone 1 setpoints, mode, programme; block persistence), **2d** (NetworkID recovery
-  timeout path, real Connect association, persistence across reboot). Zones 2/3: not testable (zone 1 only).
-- **Not started**: 3 (satellites, outdoor probe), 4 (programme and overrides), 5 (finishing, CI, other boards, first tag).
+- **Done on air**: R, 0, 1, 2a, 2b, 2c (zone 1 setpoints, mode incl. **derogations**, programme incl. edge cases; block
+  persistence), **2d** (real Connect association, persistence across reboot), all 6 ECS modes, frame inventory, memory map.
+  Zones 2/3: not testable (zone 1 only).
+- **Not started**: 3 (satellites, outdoor probe: research done, DESIGN 10.22), 4 (programme ownership, persistent overrides),
+  5 (finishing, CI, other boards, first tag).
 
 ## 2. Next steps
 
-1. **Burner state, memory exploration paused on 29/10 16:05** (zone 1 left in Hors gel, ECS Eco Horaires, as requested) (DESIGN 10.18 – 10.19). Known so far: the boiler sends no frame
-   when the burner starts; `0x79F2` and `0x79E0` are snapshots (every 10 min); `0xA029` is live but its state byte does not follow
-   a hot-water flame. « Chaudière brûleur » (flue > 40 °C) is only right at the :x8 snapshot. To resume:
-   - engine: treat the boiler's **type `0x83` answer** (7 bytes, `… 81 83 02`) as an immediate refusal of a read (seen on
-     29/10, DESIGN 10.20): silent addresses then cost ~1 s instead of ~22 s, which makes fine mapping practical;
-   - `dev/ofv_scan.py`: split refused blocks automatically (1C → 0E → 07 → … → 1 word), since a partly invalid block is
-     refused whole (`A01C`, `A0FC` silent in 0x1C words although `A029`, `A0FC` are readable);
-   - map `7900 – 7AFF`, `A000 – A1FF` (and others) flame off, then once flame on (user draws hot water ~3 min, outside
-     :x9:30 – :x2:30) and diff; results in `build/logs/scan-*.jsonl`.
-   - If nothing live is found: either keep the snapshot sensor (rename it) or derive « chauffe depuis le dernier relevé » from
-     the rise of the heating body / flow temperatures; then set `explore: false` again.
-   Earlier checks (overnight 28→29/10) were fine: 12 h, 261/261 reads, HA connected, zone block relearned at 11:07.
-   Frame inventory of normal operation done on 29/10 (PROTOCOL « Inventaire des trames », DESIGN 10.20). Open points from it:
-   the satellite's own frames are never received (check range/preamble/bit rate, e.g. by putting the board next to the
-   satellite); the RSSI of short frames is meaningless (read it per packet, not after the 68-byte capture).
+1. **Live burner state: one flame diff left** (DESIGN 10.18 – 10.22). Known: no frame on burner start/stop; `79F2`/`79E0` are
+   10-minute snapshots; `A029` is live but its state byte ignores a hot-water flame. The 352 readable words are mapped
+   (PROTOCOL « Carte mémoire »). To finish (~10 min, needs the user to draw hot water ~3 min outside :x9:30 – :x2:30):
+   `while true; do .venv/bin/python dev/ofv_scan.py flame2 --blocks 7919:1C 7935:1C 7951:15 79E0:1C 79FC:1C 7A18:1C 7A34:1C 9C40:1B A029:1C A045:1C A061:1C A07D:1C A099:03 A0F0:15; done`
+   then diff the passes before / during / after the flame. If nothing is live: rename « Chaudière brûleur » (snapshot at :x8) or
+   derive « chauffe depuis le dernier relevé » from the rise of the heating body / flow temperatures; then set `explore: false`.
+   Other open points: the satellite's own frames are never received, even at 467 kHz RX bandwidth (needs an on-site test, board
+   next to the satellite); the RSSI of short frames is meaningless (read it per packet).
+   Tools: `dev/ofv_frames.py` (frame inventory), `dev/ofv_scan.py --split` + `dev/ofv_memmap.py` (memory map),
+   `dev/ofv_setpoints.sh` (chained zone writes, each verified), `dev/ofv_api.py get|set|select|text|press`.
 2. **Decide which firmware stays the Connect**:
    - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
      (which the boiler no longer accepts); remove the old MQTT devices from Home Assistant.
@@ -44,7 +42,9 @@ Roadmap (DESIGN §10):
      « Associer Connect » before the last OK (the offer comes ~7 s after it).
 3. **If ESPHome stays, tidy up**: one production config instead of the `dev/phase-*.yaml` ones, logger below DEBUG, choose the
    exposed entities.
-4. **Phase 3**: physical satellite override, virtual satellite, outdoor probe (real or fed from HA).
+4. **Phase 3** (needs the user's go-ahead: it changes the heating regulation): outdoor probe fed from HA (device `0x20`, to pair
+   on the boiler, writes `A029` every 10 min at `:x4`), or the zone ambient from an HA sensor (writes at `A02F`, as satellite `08`
+   / association `FA`; the physical satellite rewrites it every 10 min).
 5. **Phase 4**: programme ownership (hybrid, decision D1) and persistent overrides; HA blueprint.
 6. **Phase 5**: dev tools, migration guide from the MQTT firmware, CI for the host tests, other boards (V3, LilyGo),
    documentation, first tag.
