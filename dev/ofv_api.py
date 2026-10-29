@@ -3,6 +3,7 @@
   dev/ofv_api.py get <name fragment>...        print the states whose entity name contains a fragment
   dev/ofv_api.py set <exact number name> <v>   set a number entity
   dev/ofv_api.py select <exact select name> <option>   choose a select option
+  dev/ofv_api.py text <exact text name> <value>          set a text entity
   dev/ofv_api.py press <exact button name>     press a button entity
 """
 import asyncio
@@ -21,12 +22,14 @@ async def main():
     entities, _ = await client.list_entities_services()
     names = {e.key: e.name for e in entities}
     action = sys.argv[1]
-    if action in ("set", "press", "select"):
+    if action in ("set", "press", "select", "text"):
         entity = next(e for e in entities if e.name == sys.argv[2])
         if action == "set":
             client.number_command(entity.key, float(sys.argv[3]))
         elif action == "select":
             client.select_command(entity.key, sys.argv[3])
+        elif action == "text":
+            client.text_command(entity.key, sys.argv[3])
         else:
             client.button_command(entity.key)
         await asyncio.sleep(1)

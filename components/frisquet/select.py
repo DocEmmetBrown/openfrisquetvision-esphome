@@ -12,7 +12,11 @@ CONF_FRISQUET_ID = "frisquet_id"
 # Same labels as the MQTT firmware. Order and values must match HOT_WATER_MODES / ZONE_MODES in frisquet_radio.cpp.
 TYPES = {
     "hot_water": ("kHotWater", "set_hot_water_select", ["Max", "Eco", "Eco Horaires", "Eco+", "Eco+ Horaires", "Stop"]),
-    "zone1_mode": ("kZone1Mode", "set_zone_mode_select", ["Auto", "Confort", "Réduit", "Hors Gel"]),
+    "zone1_mode": (
+        "kZone1Mode",
+        "set_zone_mode_select",
+        ["Auto", "Dérogation Confort", "Dérogation Réduit", "Confort", "Réduit", "Hors Gel"],
+    ),
 }
 
 FrisquetSelect = frisquet_ns.class_("FrisquetSelect", select.Select, cg.Component)

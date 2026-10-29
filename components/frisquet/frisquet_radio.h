@@ -240,7 +240,7 @@ class FrisquetRadio : public Component {
   ::frisquet::WriteState last_zone_state_{::frisquet::WriteState::kIdle};
   int last_zone_raw_[3]{-1, -1, -1};
   int last_zone_mode_{-1};
-  int broadcast_zone_mode_{0};  // zone block mode (0x05..0x08) matching the last broadcast, 0 if unknown
+  int broadcast_zone_mode_{0};  // select key (select_mode_from_broadcast) of the last broadcast, 0 if unknown
   int last_block_state_{-1};
   ESPPreferenceObject store_pref_;
   std::string last_program_;

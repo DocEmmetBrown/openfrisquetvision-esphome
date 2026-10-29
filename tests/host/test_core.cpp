@@ -1029,6 +1029,32 @@ static void test_zone_mode_and_program_write() {
   CHECK(to_auto.request_zone_mode(0, 0x05));  // already auto: options keep the comfort bit, gets 0x25
   CHECK(first_write(to_auto) && tx.frame[15 + 3] == 0x05 && tx.frame[15 + 4] == 0x25);
 
+  // Derogations: Auto with options 0x04 | 0x02 | comfort (MQTT firmware's Zone::setMode); the gate accepts them.
+  for (int comfort = 0; comfort < 2; ++comfort) {
+    ConnectEngine d;
+    make(d);
+    CHECK(d.request_zone_derogation(0, comfort == 1));
+    CHECK(first_write(d) && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[15 + 3] == 0x05 && tx.frame[15 + 4] == (comfort ? 0x27 : 0x26));
+    CHECK(memcmp(tx.frame + 15, reference.data(), 3) == 0 && memcmp(tx.frame + 15 + 5, reference.data() + 5, 43) == 0);
+    CHECK(select_mode_from_block(tx.frame + 15) == (comfort ? kSelectDerogationComfort : kSelectDerogationReduced));
+  }
+  ConnectEngine unknown_block;
+  unknown_block.set_policy(p);
+  CHECK(!unknown_block.request_zone_derogation(0, true));
+  {
+    // Back to Auto from a derogation clears the derogation bit, keeps the comfort bit.
+    uint8_t derog[kZoneBlockSize];
+    memcpy(derog, reference.data(), kZoneBlockSize);
+    derog[4] = 0x27;
+    CHECK(select_mode_from_block(derog) == kSelectDerogationComfort);
+    derog[4] = 0x25;
+    CHECK(select_mode_from_block(derog) == 0x05);
+    derog[3] = 0x08;
+    derog[4] = 0x10;
+    CHECK(select_mode_from_block(derog) == 0x08);
+  }
+
   // Programme: the 42 bytes are replaced, nothing else.
   uint8_t program[42];
   memcpy(program, reference.data() + 6, 42);
@@ -1248,6 +1274,18 @@ static void test_zone_mode() {
     CHECK(e.request_explore_read(0x7B00, 0x04));
     for (uint32_t t = 300; t < 40000; t += 100) e.poll(t, tx);
     CHECK(!e.explore_pending() && e.take_explore_failed() && !e.take_explore_failed());
+    CHECK(!e.explore_refused());
+
+    // Refused by the boiler (type 0x83): ends at once, flagged as refused; a refusal under another id is ignored.
+    CHECK(e.request_explore_read(0x7B10, 0x04));
+    CHECK(e.poll(40100, tx) && be16(tx.frame + 6) == 0x7B10);
+    const Bytes other_id = {0x7E, 0x80, 0xD5, static_cast<uint8_t>(tx.frame[3] + 1), 0x81, 0x83, 0x02};
+    e.on_frame(40150, other_id.data(), other_id.size(), result);
+    CHECK(e.explore_pending());
+    const Bytes refusal = {0x7E, 0x80, 0xD5, tx.frame[3], 0x81, 0x83, 0x02};
+    CHECK(!e.on_frame(40200, refusal.data(), refusal.size(), result));
+    e.poll(40300, tx);
+    CHECK(!e.explore_pending() && e.take_explore_failed() && e.explore_refused());
 
     // Dry run: nothing awaited, reported as failed.
     ep.dry_run = true;
@@ -1314,7 +1352,8 @@ static void test_zone_mode() {
   CHECK(frisquet::select_mode_from_broadcast(0x30) == 0x08);
   CHECK(frisquet::select_mode_from_broadcast(0x25) == 0x05);
   CHECK(frisquet::select_mode_from_broadcast(0x20) == 0x05);
-  CHECK(frisquet::select_mode_from_broadcast(0x23) == 0x05);  // a derogation belongs to Auto
+  CHECK(frisquet::select_mode_from_broadcast(0x23) == frisquet::kSelectDerogationComfort);
+  CHECK(frisquet::select_mode_from_broadcast(0x22) == frisquet::kSelectDerogationReduced);
   CHECK(frisquet::select_mode_from_broadcast(0x05) == 0x06);
   CHECK(frisquet::select_mode_from_broadcast(0x00) == 0x07);
   CHECK(frisquet::select_mode_from_broadcast(0x01) == 0x06);

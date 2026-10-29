@@ -31,6 +31,7 @@ class ReadTransaction {
     sends_ = 0;
     last_send_ms_ = 0;
     answer_length_ = 0;
+    refused_ = false;
     state_ = State::kRunning;
   }
 
@@ -67,6 +68,10 @@ class ReadTransaction {
   Action poll(uint32_t now_ms, uint8_t *frame, size_t capacity, size_t &length) {
     length = 0;
     if (state_ != State::kRunning) return Action::kNone;
+    if (refused_) {
+      state_ = State::kFailed;
+      return Action::kFailed;
+    }
     if (sends_ > 0 && now_ms - last_send_ms_ < kSendIntervalMs) return Action::kNone;
     if (sends_ >= kSendsPerAttempt) {
       if (attempt_ + 1 >= attempts_) {
@@ -97,22 +102,31 @@ class ReadTransaction {
     return Action::kSend;
   }
 
-  // Feed every received frame; true when it is the awaited answer.
+  // Feed every received frame; true when it is the awaited answer. A read refused by the boiler (type 0x83,
+  // seen for invalid addresses on 29/10/2026: 7E 80 <assoc> <id> 81 83 02) ends the transaction at the next poll.
   bool on_frame(const uint8_t *frame, size_t length) {
     if (state_ != State::kRunning) return false;
     Header h;
     if (!parse_header(frame, length, h)) return false;
     const uint8_t reply_type = kind_ == Kind::kRead ? kRead : kInit;
     if (kind_ == Kind::kZoneWrite) return false;  // the engine matches the block echo itself
-    if (h.type != reply_type || h.reception != 0x81 || h.source != kIdBoiler || h.destination != self_id_ ||
-        h.association != association_ || h.message_id != message_id_)
+    if (h.reception != 0x81 || h.source != kIdBoiler || h.destination != self_id_ || h.association != association_ ||
+        h.message_id != message_id_)
       return false;
+    if (kind_ == Kind::kRead && h.type == (kRead | 0x80)) {
+      refused_ = true;
+      return false;
+    }
+    if (h.type != reply_type) return false;
     if (length > sizeof(answer_)) return false;
     memcpy(answer_, frame, length);
     answer_length_ = length;
     state_ = State::kDone;
     return true;
   }
+
+  // True after a failure caused by the boiler's refusal rather than by silence.
+  bool refused() const { return refused_; }
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
@@ -130,6 +144,7 @@ class ReadTransaction {
   uint16_t size_words_ = 0;
   uint8_t attempts_ = kAttempts;
   uint8_t attempt_ = 0;
+  bool refused_ = false;
   uint8_t sends_ = 0;
   uint32_t last_send_ms_ = 0;
   uint8_t answer_[64] = {};

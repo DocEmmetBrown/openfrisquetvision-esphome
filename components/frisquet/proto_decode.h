@@ -156,16 +156,27 @@ inline DecodedZoneMode decode_zone_mode(uint8_t raw) {
 }
 
 // The zone block mode (05 Auto, 06 Confort, 07 Réduit, 08 Hors gel) a broadcast mode byte stands for; 0 when unknown.
-// Derogations belong to Auto.
-inline uint8_t select_mode_from_broadcast(uint8_t raw) {
+// Derogations are Auto (05) with options 0x02: they get their own keys, 0x105 (comfort) and 0x205 (reduced).
+constexpr uint16_t kSelectDerogationComfort = 0x105;
+constexpr uint16_t kSelectDerogationReduced = 0x205;
+inline uint16_t select_mode_from_broadcast(uint8_t raw) {
   const DecodedZoneMode decoded = decode_zone_mode(raw);
   switch (decoded.mode) {
     case ZoneMode::kFrostProtection: return 0x08;
     case ZoneMode::kComfortPermanent: return 0x06;
     case ZoneMode::kReducedPermanent: return 0x07;
+    case ZoneMode::kComfortOverride: return kSelectDerogationComfort;
+    case ZoneMode::kReducedOverride: return kSelectDerogationReduced;
     case ZoneMode::kUnknown: return 0;
     default: return 0x05;
   }
+}
+
+// Same key from a zone block: mode byte 3, options byte 4 (0x02 derogation, 0x01 comfort).
+inline uint16_t select_mode_from_block(const uint8_t *block) {
+  if (block[3] == 0x05 && (block[4] & 0x02))
+    return (block[4] & 0x01) ? kSelectDerogationComfort : kSelectDerogationReduced;
+  return block[3];
 }
 
 // ----- Boiler → zone-1 satellite broadcast (type 0x17, 49 bytes, every 10 minutes) -----

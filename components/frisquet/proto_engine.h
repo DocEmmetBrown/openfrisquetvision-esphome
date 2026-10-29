@@ -153,6 +153,16 @@ class ConnectEngine {
     block[4] = static_cast<uint8_t>((block[4] & ~0x17) | owned);
     return request_zone_block(zone_index, block, kZoneFieldMode);
   }
+  // Auto with a derogation until the satellite's next programme transition: options 0x04 | 0x02 | comfort, as the
+  // MQTT firmware writes it (Zone::setMode). Choosing Auto again clears it.
+  bool request_zone_derogation(uint8_t zone_index, bool comfort) {
+    if (zone_index >= 3 || !zone_confirmed_[zone_index]) return false;
+    uint8_t block[kZoneBlockSize];
+    memcpy(block, zone_block_[zone_index], kZoneBlockSize);
+    block[3] = 0x05;
+    block[4] = static_cast<uint8_t>((block[4] & ~0x17) | 0x06 | (comfort ? 0x01 : 0x00));
+    return request_zone_block(zone_index, block, kZoneFieldMode);
+  }
   bool request_zone_program(uint8_t zone_index, const uint8_t *program) {
     if (zone_index >= 3 || !zone_confirmed_[zone_index] || !program) return false;
     uint8_t block[kZoneBlockSize];
@@ -335,12 +345,14 @@ class ConnectEngine {
     return true;
   }
   bool explore_pending() const { return explore_pending_; }
-  // True once after an exploratory read ended without an answer (unanswered, blocked or dry run).
+  // True once after an exploratory read ended without an answer (unanswered, refused, blocked or dry run).
   bool take_explore_failed() {
     const bool failed = explore_failed_;
     explore_failed_ = false;
     return failed;
   }
+  // Whether the last exploratory failure was the boiler's refusal (type 0x83), i.e. an invalid address.
+  bool explore_refused() const { return explore_refused_; }
   uint16_t explore_address() const { return explore_address_; }
   uint16_t explore_words() const { return explore_words_; }
 
@@ -351,6 +363,7 @@ class ConnectEngine {
     if (current_kind_ != ReadKind::kExplore || !explore_pending_) return;
     explore_pending_ = false;
     explore_failed_ = true;
+    explore_refused_ = transaction_.refused();
   }
 
   void enqueue_(ReadKind kind) {
@@ -469,6 +482,7 @@ class ConnectEngine {
   uint16_t explore_words_ = 0;
   bool explore_pending_ = false;
   bool explore_failed_ = false;
+  bool explore_refused_ = false;
   SlotSchedule temperature_slots_[kTemperatureSlots];
   SlotSchedule status_slots_[kStatusSlots];
   SlotSchedule consumption_slot_;

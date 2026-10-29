@@ -148,15 +148,24 @@ void FrisquetRadio::republish_zone_block() {
 namespace {
 struct ZoneModeName {
   const char *name;
-  uint8_t mode;
+  uint16_t mode;  // byte 3 of the zone block, or a derogation key (select_mode_from_block)
 };
-// Same labels and order as ZONE_MODES in select.py; mode = byte 3 of the zone block.
-const ZoneModeName ZONE_MODES[] = {{"Auto", 0x05}, {"Confort", 0x06}, {"Réduit", 0x07}, {"Hors Gel", 0x08}};
+// Same labels as ZONE_MODES in select.py.
+const ZoneModeName ZONE_MODES[] = {{"Auto", 0x05},
+                                   {"Dérogation Confort", ::frisquet::kSelectDerogationComfort},
+                                   {"Dérogation Réduit", ::frisquet::kSelectDerogationReduced},
+                                   {"Confort", 0x06},
+                                   {"Réduit", 0x07},
+                                   {"Hors Gel", 0x08}};
 }  // namespace
 
 bool FrisquetRadio::request_zone_mode(const std::string &name) {
-  for (const ZoneModeName &entry : ZONE_MODES)
-    if (name == entry.name) return this->engine_.request_zone_mode(0, entry.mode);
+  for (const ZoneModeName &entry : ZONE_MODES) {
+    if (name != entry.name) continue;
+    if (entry.mode > 0xFF)
+      return this->engine_.request_zone_derogation(0, entry.mode == ::frisquet::kSelectDerogationComfort);
+    return this->engine_.request_zone_mode(0, static_cast<uint8_t>(entry.mode));
+  }
   return false;
 }
 
@@ -205,7 +214,8 @@ void FrisquetRadio::sync_zone_() {
   // The command select follows the zone block once it is confirmed; before that (unknown, or restored and maybe stale)
   // it follows the mode the satellite itself broadcasts.
   const bool block_confirmed = this->engine_.zone_block_confirmed(0);
-  const int select_mode = block_confirmed ? this->engine_.zone_block(0)[3] : this->broadcast_zone_mode_;
+  const int select_mode =
+      block_confirmed ? ::frisquet::select_mode_from_block(this->engine_.zone_block(0)) : this->broadcast_zone_mode_;
   if (select_mode > 0 && select_mode != this->last_zone_mode_) {
     this->last_zone_mode_ = select_mode;
 #ifdef USE_SELECT
@@ -588,7 +598,8 @@ void FrisquetRadio::tx_step_(uint32_t now) {
   this->sync_hot_water_();
   this->sync_zone_();
   if (this->engine_.take_explore_failed())
-    ESP_LOGI(TAG, "EXPLORE %04X+%02X: no answer", this->engine_.explore_address(), this->engine_.explore_words());
+    ESP_LOGI(TAG, "EXPLORE %04X+%02X: %s", this->engine_.explore_address(), this->engine_.explore_words(),
+             this->engine_.explore_refused() ? "boiler refused" : "no answer");
   // On the broadcast network (or until the installation's sync word is applied again) nothing of ours goes out.
   if (!this->on_installation_network_()) {
     this->pending_tx_valid_ = false;
