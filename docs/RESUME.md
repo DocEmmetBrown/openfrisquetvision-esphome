@@ -1,4 +1,4 @@
-# Resuming work (state at 28/10/2026 22:40)
+# Resuming work (state at 29/10/2026 16:10)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
 (windows 10.1 → 10.19); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
@@ -10,9 +10,9 @@ Everything needed to pick the project up again. Detailed history and measurement
 | Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.6-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
-| Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF |
+| Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 678 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 730 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -22,12 +22,17 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-1. **Check the overnight run** (morning of 29/10): logs or API (`dev/ofv_api.py get "Radio" "Chaudière" "Zone 1"`):
-   - the boiler shows no « anomalie avec Connect »; reads OK; relays acknowledged (« Radio accusés envoyés » > 0);
-   - zone 1 block: the stale Auto copy was discarded at 23:00 (« inconnu », see DESIGN 10.17); expect it to be relearned
-     and « confirmé » at the next relay (a change on the satellite triggers one);
-   - Home Assistant stayed connected (added on 28/10 ~22:37 through the ESPHome integration, key = `api_key` of
-     `dev/secrets.yaml`).
+1. **Burner state, memory exploration paused on 29/10 16:05** (DESIGN 10.18 – 10.19). Known so far: the boiler sends no frame
+   when the burner starts; `0x79F2` and `0x79E0` are snapshots (every 10 min); `0xA029` is live but its state byte does not follow
+   a hot-water flame. « Chaudière brûleur » (flue > 40 °C) is only right at the :x8 snapshot. To resume:
+   - engine: exploratory reads with one attempt and a ~2 s timeout (today 2 attempts, ~22 s per silent address);
+   - `dev/ofv_scan.py`: split refused blocks automatically (1C → 0E → 07 → … → 1 word), since a partly invalid block is
+     refused whole (`A01C`, `A0FC` silent in 0x1C words although `A029`, `A0FC` are readable);
+   - map `7900 – 7AFF`, `A000 – A1FF` (and others) flame off, then once flame on (user draws hot water ~3 min, outside
+     :x9:30 – :x2:30) and diff; results in `build/logs/scan-*.jsonl`.
+   - If nothing live is found: either keep the snapshot sensor (rename it) or derive « chauffe depuis le dernier relevé » from
+     the rise of the heating body / flow temperatures; then set `explore: false` again.
+   Earlier checks (overnight 28→29/10) were fine: 12 h, 261/261 reads, HA connected, zone block relearned at 11:07.
 2. **Decide which firmware stays the Connect**:
    - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
      (which the boiler no longer accepts); remove the old MQTT devices from Home Assistant.
