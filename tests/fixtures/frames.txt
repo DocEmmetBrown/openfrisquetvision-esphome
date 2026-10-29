@@ -21,7 +21,7 @@ payload_sat_broadcast = 08 80 FA C0 81 17 2A 05 0A 00 00 26 10 25 17 57 03 28 00
 # Same broadcast at 22:10:12 (reduced period, satellite in Auto): mode byte 0x20 = Auto, reduced
 payload_sat_broadcast_reduced = 08 80 FA 60 81 17 2A 05 0A 00 00 26 10 25 22 10 12 20 00 00 C9 00 AA 00 20 00 C6 00 C6 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
 
-# Same kind of broadcast at 13:10:12, plain mode byte 0x05
+# Same kind of broadcast at 13:10:12, plain mode byte 0x05: Confort (permanent), as verified on 2026-10-29
 payload_sat_broadcast_plain = 08 80 FA 28 81 17 2A 05 0A 00 00 26 10 25 13 10 12 28 00 00 C8 00 BE 00 05 01 29 00 FF 04 F6 00 00 00 00 00 00 00 00 04 F6 00 00 00 00 00 00 00 00
 
 # Boiler -> zone-1 satellite broadcast at 2026-10-26 09:20:12: fault bit set while running (state 0x29), weekday 1

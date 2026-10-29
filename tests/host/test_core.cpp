@@ -171,7 +171,7 @@ static void test_satellite_broadcast() {
   CHECK_NEAR(b.ambient[0], 20.0f, 0.001f);
   CHECK_NEAR(b.setpoint[0], 19.0f, 0.001f);
   const frisquet::DecodedZoneMode plain_mode = frisquet::decode_zone_mode(b.mode_raw[0]);
-  CHECK(plain_mode.mode == frisquet::ZoneMode::kComfortAuto);
+  CHECK(plain_mode.mode == frisquet::ZoneMode::kComfortPermanent);  // 0x05 = Confort (verified 29/10)
   CHECK(!plain_mode.connect_compat);
 }
 
@@ -1298,7 +1298,8 @@ static void test_zone_mode() {
   CHECK(frisquet::decode_zone_mode(0x40).mode == frisquet::ZoneMode::kUnknown);
   CHECK(frisquet::decode_zone_mode(0x00).mode == frisquet::ZoneMode::kReducedPermanent);
   CHECK(!frisquet::decode_zone_mode(0x00).connect_compat);
-  CHECK(frisquet::decode_zone_mode(0x05).mode == frisquet::ZoneMode::kComfortAuto);
+  CHECK(frisquet::decode_zone_mode(0x05).mode == frisquet::ZoneMode::kComfortPermanent);  // 29/10, Confort set
+  CHECK(frisquet::decode_zone_mode(0x04).mode == frisquet::ZoneMode::kReducedPermanent);
 
   CHECK(frisquet::decode_zone_mode(0x10).mode == frisquet::ZoneMode::kFrostProtection);
   CHECK(frisquet::decode_zone_mode(0x30).mode == frisquet::ZoneMode::kFrostProtection);
@@ -1314,7 +1315,7 @@ static void test_zone_mode() {
   CHECK(frisquet::select_mode_from_broadcast(0x25) == 0x05);
   CHECK(frisquet::select_mode_from_broadcast(0x20) == 0x05);
   CHECK(frisquet::select_mode_from_broadcast(0x23) == 0x05);  // a derogation belongs to Auto
-  CHECK(frisquet::select_mode_from_broadcast(0x05) == 0x05);
+  CHECK(frisquet::select_mode_from_broadcast(0x05) == 0x06);
   CHECK(frisquet::select_mode_from_broadcast(0x00) == 0x07);
   CHECK(frisquet::select_mode_from_broadcast(0x01) == 0x06);
   CHECK(frisquet::select_mode_from_broadcast(0x40) == 0);

@@ -513,6 +513,19 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Reste : réponse « pas de réponse » plus rapide pour l'exploration (1 essai, ~2 s) et découpage automatique des blocs refusés,
   puis comparaison flamme éteinte / allumée. Le capteur « Chaudière brûleur » n'est fiable qu'à l'instant du relevé de :x8.
 
+### 10.20 Capture complète en fonctionnement normal (29/10/2026 16:13 – 16:50)
+
+- Outil `dev/ofv_frames.py` : inventaire de toutes les trames des journaux (classe, nombre, heures, RSSI, exemple). Résultat consigné
+  dans PROTOCOL.md (« Inventaire des trames de la chaudière »).
+- Séance : ECS Eco Horaires → Eco → Eco Horaires (vérifiés en ~1 s chacun) ; zone 1 Hors gel → Auto (16:14:34) → Confort (16:29:22) →
+  Réduit (16:34:34) → **Hors gel (16:44:34)**, état final demandé. Séquence complète d'une écriture de zone : transmission au
+  satellite (réc `7E`), écho (`88`), réponse d'état au satellite (`81`), relais du bloc normalisé (`08`), relais de notre accusé (`FE`).
+- **Correction** : la diffusion d'un satellite en **Confort permanent vaut `05`** (lu « Auto (confort) » jusque-là) ; le bit `0x04` est
+  ignoré dans les deux familles (`0.7.7`, tests 731 vérifications). Vérifié après redémarrage : bloc confirmé, Hors gel affiché.
+- Découvertes : la chaudière **refuse une lecture invalide par une trame de type `0x83`** (7 octets) au lieu de se taire ; le RSSI
+  « −100 dBm » des trames courtes est un artefact de la capture à 68 octets ; les trames émises **par le satellite** ne sont jamais
+  reçues (cause inconnue).
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

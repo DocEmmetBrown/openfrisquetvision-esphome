@@ -80,6 +80,9 @@ jour de la semaine (1, 0 = dimanche), puis par zone (Z1, Z2, Z3 ; 10 octets chac
   options `00`. `20` (Auto réduit) et `00` (réduit permanent) sont donc bien distincts. Après le retour au programme normal, le confort
   en Auto s'est affiché `21` (et non `25`) : le bit `0x04` dépend de ce que le Connect a écrit en dernier (il reprend les options que le
   satellite lui renvoie). Règle de décodage retenue : bit `0x20` = famille Auto, bit `0x01` = confort ; `00` seul = réduit permanent.*
+  **Table vérifiée le 29/10/2026** (chaque mode réglé depuis le Connect, diffusion suivante) : Auto confort `25`, **Confort `05`**,
+  Réduit `00`, Hors gel `10` (ou `14`). Le bit `0x04` ne porte aucun sens, dans les deux familles : il est ignoré. L'ancienne lecture
+  « `05` = confort auto » était fausse.
 
 ## Échanges de zone (type 0x17, 63 octets)
 
@@ -127,6 +130,26 @@ réseau de diffusion, 10 fois à 30 ms d'intervalle, par l'en-tête de réponse 
 (10 octets) : `80 <soi> <association> <id> <réception|0x80> 41 <NetworkID:4>`, ici `80 7E D5 D4 82 41 05 D9 8D C9` ; la
 chaudière affiche alors OK et répond aux lectures avec la nouvelle association. Le destinataire de l'offre n'est pas vérifié.
 
+## Inventaire des trames de la chaudière (capture du 29/10/2026 16:13 – 16:45, `dev/ofv_frames.py`)
+
+Toutes les trames reçues pendant une séance où le Connect a changé le mode ECS (aller-retour) et le mode de zone 1
+(Hors gel → Auto → Confort → Réduit → Hors gel). Les trames du **satellite vers la chaudière ne sont jamais reçues** par la carte
+(pas même rejetées : une seule trame rejetée en plusieurs heures) ; on n'en voit que les effets.
+
+| Trame (chaudière →) | Réc. | Longueur | Quand | Rôle |
+|---|---|---|---|---|
+| satellite `08 80 FA` type `17` | `81` | 49 | toutes les 10 min (`:x0:08`) et après chaque changement de zone | réponse à l'échange d'état du satellite (données de `A029`) |
+| satellite, type `17`, `A154`/`A154` | `7E` | 63 | rafales (×2 par envoi) pendant une écriture du Connect | **transmission de notre bloc** au satellite, « de la part » du Connect |
+| Connect, type `17`, 48 octets | `88` | 55 | dès que le satellite accepte | écho : bloc accepté par le satellite (`08` + accusé) |
+| Connect, type `17`, `A154 x15`/`A154 x18` | `08` | 63 | 3 à 5 s après | **relais** du bloc normalisé par le satellite (le Connect doit l'accuser) |
+| satellite, type `17`, 48 octets | `FE` | 55 | juste après notre accusé | relais de **notre accusé** au satellite (`7E` + accusé) |
+| Connect, type `17`, `02 00 <mode>` | `81` | 9 | écriture du mode ECS | accusé, avec la valeur relue en `A0FC` |
+| Connect, type `03` | `81` | 9 à 63 | réponses à nos lectures | `79F2`, `7A18`, `A063`, `A0FC`, `A029`… |
+| Connect, type **`83`**, `02` | `81` | 7 | lecture d'une adresse invalide | **refus de lecture** (aussitôt, au lieu d'un silence) |
+| diffusion `00`, type `41` | `02` | 11 | mode association | offre d'association (voir plus haut) |
+
+Rien d'autre : pas de trame liée au brûleur, aux puisages d'eau chaude ou aux changements de température.
+
 ## Créneaux (cycle de 10 minutes)
 
 | Instant | Émetteur | Action |
@@ -142,6 +165,9 @@ fonctionnement.
 
 ## Réception observée (Heltec V4.3)
 
-Diffusion chaudière → satellite à ≈ −100 dBm ; réponses de la chaudière au Connect à ≈ −80 dBm. L'activation du LNA (bypass désactivé)
+Diffusion chaudière → satellite à ≈ −100 dBm ; réponses de la chaudière au Connect à ≈ −80 dBm. **Correction du 29/10** : cet écart
+suit la **longueur** des trames (63 octets ≈ −75 dBm, toutes les plus courtes ≈ −100 dBm, même émetteur) ; la capture est de 68
+octets fixes et le RSSI est lu après, donc sur le bruit pour une trame courte. La réception des diffusions n'est pas faible.
+L'activation du LNA (bypass désactivé)
 a coïncidé avec la disparition d'échecs de lecture intermittents (observation sur quelques heures, pas une preuve) ; un échec
 d'association laissait la radio sur le réseau de diffusion (corrigé, voir `DESIGN.md`).

@@ -1,18 +1,18 @@
-# Resuming work (state at 29/10/2026 16:10)
+# Resuming work (state at 29/10/2026 16:55)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.19); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.20); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.6-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.7-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 730 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 731 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -22,10 +22,11 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-1. **Burner state, memory exploration paused on 29/10 16:05** (DESIGN 10.18 – 10.19). Known so far: the boiler sends no frame
+1. **Burner state, memory exploration paused on 29/10 16:05** (zone 1 left in Hors gel, ECS Eco Horaires, as requested) (DESIGN 10.18 – 10.19). Known so far: the boiler sends no frame
    when the burner starts; `0x79F2` and `0x79E0` are snapshots (every 10 min); `0xA029` is live but its state byte does not follow
    a hot-water flame. « Chaudière brûleur » (flue > 40 °C) is only right at the :x8 snapshot. To resume:
-   - engine: exploratory reads with one attempt and a ~2 s timeout (today 2 attempts, ~22 s per silent address);
+   - engine: treat the boiler's **type `0x83` answer** (7 bytes, `… 81 83 02`) as an immediate refusal of a read (seen on
+     29/10, DESIGN 10.20): silent addresses then cost ~1 s instead of ~22 s, which makes fine mapping practical;
    - `dev/ofv_scan.py`: split refused blocks automatically (1C → 0E → 07 → … → 1 word), since a partly invalid block is
      refused whole (`A01C`, `A0FC` silent in 0x1C words although `A029`, `A0FC` are readable);
    - map `7900 – 7AFF`, `A000 – A1FF` (and others) flame off, then once flame on (user draws hot water ~3 min, outside
@@ -33,6 +34,9 @@ Roadmap (DESIGN §10):
    - If nothing live is found: either keep the snapshot sensor (rename it) or derive « chauffe depuis le dernier relevé » from
      the rise of the heating body / flow temperatures; then set `explore: false` again.
    Earlier checks (overnight 28→29/10) were fine: 12 h, 261/261 reads, HA connected, zone block relearned at 11:07.
+   Frame inventory of normal operation done on 29/10 (PROTOCOL « Inventaire des trames », DESIGN 10.20). Open points from it:
+   the satellite's own frames are never received (check range/preamble/bit rate, e.g. by putting the board next to the
+   satellite); the RSSI of short frames is meaningless (read it per packet, not after the 68-byte capture).
 2. **Decide which firmware stays the Connect**:
    - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
      (which the boiler no longer accepts); remove the old MQTT devices from Home Assistant.
@@ -69,7 +73,7 @@ Files outside git (all in `build/`, gitignored):
 
 ```sh
 . dev/ofv-env.sh && .venv/bin/esphome compile dev/phase-2d-associate.yaml   # the config running on the board
-grep -c -a 0.7.6-phase-2d-associate dev/.esphome/build/frisquette/build/firmware.ota.bin   # must be > 0
+grep -c -a 0.7.7-phase-2d-associate dev/.esphome/build/frisquette/build/firmware.ota.bin   # must be > 0
 ```
 
 All dev configs share the device name `frisquette`, hence one build directory: always check the version string of the image

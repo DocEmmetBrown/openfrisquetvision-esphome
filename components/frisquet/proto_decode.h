@@ -143,12 +143,15 @@ inline DecodedZoneMode decode_zone_mode(uint8_t raw) {
     else out.mode = (low & 0x01) ? ZoneMode::kComfortAuto : ZoneMode::kReducedAuto;
     return out;
   }
-  // Hors gel set on the satellite: 0x14 on 2026-10-28 (0x10 plus the 0x04 bit that also varies in Auto).
-  if (raw & 0x10) {
+  // Bit 0x04 varies without meaning outside the 0x20 family too (verified 29/10/2026 by setting each mode from the
+  // Connect): Confort 0x05, Réduit 0x00, Hors gel 0x14 or 0x10. Older notes read 0x05 as "auto, comfort": wrong.
+  const uint8_t low = raw & static_cast<uint8_t>(~0x04);
+  // Hors gel set on the satellite: 0x14 on 2026-10-28, 0x10 on 2026-10-29.
+  if (low & 0x10) {
     out.mode = ZoneMode::kFrostProtection;
     return out;
   }
-  out.mode = zone_mode_direct(raw);
+  out.mode = zone_mode_direct(low);
   return out;
 }
 
