@@ -597,7 +597,13 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Essai : page `A029` lue (`00A9 0050 0010 00C6`), envoi de `00A9 0055 0010 00C6` (hors-gel 8,5 °C) à 12:37:46 : réponse de la chaudière
   en 0,12 s et `A029` à **8,5 °C aussitôt**. Échange intermédiaire du satellite à 12:38:41 : inchangé. **Échange régulier de 12:40:06 :
   le satellite remet 8,0 °C.** Une consigne directe tient donc jusqu'au prochain échange régulier (≤ 10 min).
-- Suite : double envoi (directe immédiate + bloc ; réaffirmer la directe après chaque échange régulier tant que le bloc n'a pas abouti).
+- Double envoi (`0.7.16` → `0.7.17`) : avec `satellite_override`, toute écriture de zone 1 envoie aussi la consigne directe (consigne
+  active calculée : mode, dérogation, ou programme à l'heure de la chaudière ; ambiante et mot suivant recopiés de la dernière page) ;
+  après chaque échange propre du satellite qui montre une autre consigne, elle est réaffirmée aussitôt (même dans la fenêtre réservée,
+  l'échange étant terminé) ; arrêt dès que l'écriture du bloc est finie (vérifiée, échouée ou supplantée). Tests hôte : 846.
+- **Défaut trouvé** : la réponse à notre consigne directe (12:37:46, page à 8,5 °C) a été prise pour l'échange du satellite et a fait
+  effacer le bloc restauré (hors-gel 8,0 °C, jugé périmé). `0.7.17` : nos propres réponses ne servent plus à vérifier le bloc. Le bloc
+  reste inconnu jusqu'au prochain changement fait sur le satellite ; essai du double envoi à faire ensuite.
 - Bouton « info » : il provoque un échange d'état du satellite (réponse de la chaudière entendue, « Chaudière horloge » mise à jour),
   mais une rafale envoyée aussitôt après (12:33:53) n'a abouti qu'au créneau `:x4:37` (12:34:31) : le satellite n'écoute pas les
   relais à ce moment-là, ou pas assez longtemps.

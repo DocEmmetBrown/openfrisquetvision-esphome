@@ -1,4 +1,4 @@
-# Resuming work (state at 31/10/2026 11:25)
+# Resuming work (state at 31/10/2026 13:30)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
 (windows 10.1 → 10.25); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
@@ -7,13 +7,13 @@ Everything needed to pick the project up again. Detailed history and measurement
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.15-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.17-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes 20,0 / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 825 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 846 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -60,10 +60,12 @@ Roadmap (DESIGN §10):
    - **Burner detection while heating**: done 31/10 (DESIGN 10.24): heating demand ⇒ flue snapshot (> 40 °C, twice per
      10 min), otherwise the body-temperature slope (hot water). Possible refinement: ignore the slope for ~2 min after a
      heating demand ends (the body keeps rising when the pump stops).
-   - **Direct setpoint + block (user idea, validated 31/10, DESIGN 10.25)**: on a zone setpoint/mode change, send the consigne
-     at once in the satellite's name (`A02F`, immediate effect) and the zone block in parallel; after each regular satellite
-     exchange (`:x0`) re-assert the direct consigne until the block is verified. In Auto, compute the active setpoint from the
-     known programme. Test command available: `SAT <16 hex>` on « Radio lecture exploratoire » (`satellite_override: true`).
+   - **Direct setpoint + block (user idea, validated 31/10, DESIGN 10.25)**: implemented in `0.7.17` (with every zone 1 write
+     when `satellite_override` is set; re-assertion after the satellite's own exchange; our own answers ignored by the block
+     check). **Not yet tried on the boiler**: the zone block is unknown since 31/10 12:37 (erased by the SAT test, bug fixed),
+     so zone writes are refused until a change is made on the satellite (any local change makes the boiler relay the block).
+     Then: set « Zone 1 consigne hors-gel » to 8.5 from HA, check `A029` (setpoint 0x55) within seconds, the block echo at the
+     satellite's slot, then back to 8.0. Test command: `SAT <16 hex>` on « Radio lecture exploratoire ».
    - **Send zone writes when the satellite is awake**: an off-schedule boiler→satellite state answer means the satellite is
      awake (info button, or local change): send the pending burst at once, even in the quiet window (DESIGN 10.24).
    - **Merge zone requests**: a request made while a zone write is pending is refused today; merge it into the pending block
