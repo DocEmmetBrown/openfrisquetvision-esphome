@@ -1851,6 +1851,131 @@ static void test_burner() {
     CHECK(e.on_frame(200, answer.data(), answer.size(), result) && result.kind == ReadKind::kSatelliteConsigne);
     CHECK(!e.reading());
   }
+
+  // Dual path: a zone write also sends the consigne directly, re-asserted after the satellite's own exchange.
+  {
+    const Bytes &known = F["payload_zone_relay_live"];  // mode 05, options 21, comfort 19.0
+    ConnectEngine d;
+    TxPolicy dp = engine_policy(TxLevel::kWrite, false);
+    dp.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode | kZoneFieldProgram;
+    dp.satellite_override = true;
+    dp.satellite_association = 0xFA;
+    d.set_policy(dp);
+    d.set_next_message_id(0x40);
+    d.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x22, 0x14, 0x30);  // Sunday 25/10 22:14:30
+    ReadResult result;
+    d.on_frame(100, known.data(), known.size(), result);
+    TxRequest tx;
+    CHECK(d.poll(110, tx) && tx.kind == TxClass::kZoneAck);
+    // The state page (broadcast of 22:10:12, weekday 0): Auto reduced, setpoint 17.0.
+    Bytes page = F["payload_sat_broadcast_reduced"];
+    d.on_frame(200, page.data(), page.size(), result);
+    // Hors gel: the boiler gets frost 8.0 at once, then the block goes to the satellite.
+    CHECK(d.request_zone_mode(0, 0x08));
+    CHECK(d.poll(300, tx) && tx.kind == TxClass::kSatelliteConsigne && tx.verdict == TxVerdict::kSend);
+    CHECK(be16(tx.frame + 17) == 80 && tx.frame[20] == 0x10);       // setpoint 8.0, mode byte Hors gel
+    CHECK(tx.frame[15] == page[7 + 12] && tx.frame[16] == page[7 + 13]);  // ambient copied
+    Bytes reply = page;
+    reply[3] = tx.frame[3];
+    reply[7 + 14] = 0x00;
+    reply[7 + 15] = 0x50;  // the page now shows 8.0
+    reply[7 + 17] = 0x10;
+    d.on_frame(400, reply.data(), reply.size(), result);
+    bool block = false;
+    for (uint32_t t = 500; t < 4000; t += 100)
+      if (d.poll(t, tx) && tx.kind == TxClass::kZoneWrite) block = true;
+    CHECK(block && d.direct_active());
+    // The satellite's own regular exchange puts its old setpoint back: re-asserted (after the burst in progress).
+    Bytes own = page;
+    own[3] = 0x77;
+    d.on_frame(5000, own.data(), own.size(), result);
+    bool again = false;
+    uint32_t t = 5000;
+    for (; t < 30000 && !again; t += 100)
+      if (d.poll(t, tx) && tx.kind == TxClass::kSatelliteConsigne) again = be16(tx.frame + 17) == 80;
+    CHECK(again);
+    Bytes reply2 = reply;
+    reply2[3] = tx.frame[3];
+    d.on_frame(t, reply2.data(), reply2.size(), result);  // the boiler answers the re-assertion
+    // An exchange that already shows our setpoint changes nothing.
+    Bytes ok = reply;
+    ok[3] = 0x78;
+    d.on_frame(t, ok.data(), ok.size(), result);
+    bool extra = false;
+    for (const uint32_t end = t + 30000; t < end; t += 100)
+      if (d.poll(t, tx) && tx.kind == TxClass::kSatelliteConsigne) extra = true;
+    CHECK(!extra);
+    // A change on the satellite meanwhile supersedes the write: no more direct consigne.
+    Bytes local = known;
+    local[15] = 0x82;
+    local[3] = 0x50;
+    d.on_frame(t, local.data(), local.size(), result);
+    CHECK(d.zone_write_state() == WriteState::kSuperseded);
+    for (const uint32_t end = t + 1000; t < end; t += 100) d.poll(t, tx);
+    CHECK(!d.direct_active());
+    d.on_frame(t, own.data(), own.size(), result);
+    extra = false;
+    for (const uint32_t end = t + 30000; t < end; t += 100)
+      if (d.poll(t, tx) && tx.kind == TxClass::kSatelliteConsigne) extra = true;
+    CHECK(!extra);
+  }
+  // Regression 31/10 12:37: the answer to our own consigne must not discard a restored block.
+  {
+    ConnectEngine r;
+    TxPolicy rp = engine_policy(TxLevel::kWrite, false);
+    rp.satellite_override = true;
+    rp.satellite_association = 0xFA;
+    r.set_policy(rp);
+    r.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x22, 0x14, 0x30);
+    const Bytes &known = F["payload_zone_relay_live"];  // comfort 19.0, mode 05
+    r.restore_zone_block(0, known.data() + 15);
+    CHECK(r.zone_block_known(0) && !r.zone_block_confirmed(0));
+    uint8_t data[8] = {0x00, 0xA9, 0x00, 0x55, 0x00, 0x10, 0x00, 0xC6};  // 8.5, Hors gel: not this block
+    CHECK(r.request_satellite_consigne(data));
+    TxRequest tx;
+    CHECK(r.poll(100, tx) && tx.kind == TxClass::kSatelliteConsigne);
+    Bytes answer = F["payload_sat_broadcast_reduced"];
+    answer[3] = tx.frame[3];
+    answer[7 + 14] = 0x00;
+    answer[7 + 15] = 0x55;
+    answer[7 + 17] = 0x10;
+    ReadResult result;
+    r.on_frame(200, answer.data(), answer.size(), result);
+    SatelliteBroadcast b;
+    CHECK(decode_satellite_broadcast(answer.data(), answer.size(), b));
+    r.on_zone_broadcast(0, b.mode_raw[0], b.setpoint[0], b.weekday, b.hour, b.minute);  // as the component does
+    CHECK(r.zone_block_known(0) && !r.zone_block_confirmed(0));
+    // The satellite's own inconsistent exchange still discards it.
+    Bytes own = answer;
+    own[3] = static_cast<uint8_t>(tx.frame[3] + 7);
+    r.on_frame(300, own.data(), own.size(), result);
+    r.on_zone_broadcast(0, b.mode_raw[0], b.setpoint[0], b.weekday, b.hour, b.minute);
+    CHECK(!r.zone_block_known(0));
+  }
+  // Auto: the active setpoint follows the programme at the boiler's time.
+  {
+    const Bytes &known = F["payload_zone_relay_live"];
+    ConnectEngine a;
+    TxPolicy ap = engine_policy(TxLevel::kWrite, false);
+    ap.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode | kZoneFieldProgram;
+    ap.satellite_override = true;
+    ap.satellite_association = 0xFA;
+    a.set_policy(ap);
+    a.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x22, 0x14, 0x30);
+    ReadResult result;
+    a.on_frame(100, known.data(), known.size(), result);
+    TxRequest tx;
+    a.poll(110, tx);
+    Bytes page = F["payload_sat_broadcast_reduced"];
+    page[7 + 15] = 0x50;  // pretend the boiler holds 8.0 so that a change is needed
+    a.on_frame(200, page.data(), page.size(), result);
+    CHECK(a.request_zone_setpoints(0, 0x96, 0x78, 0x1E));  // still Auto; Sunday 22:14 is reduced in this programme
+    CHECK(a.poll(300, tx) && tx.kind == TxClass::kSatelliteConsigne);
+    const uint8_t *prog = known.data() + 15 + 6;
+    const bool comfort_now = (prog[0 * 6 + 44 / 8] >> (44 % 8)) & 1;  // Sunday, slot 44 = 22:00-22:30
+    CHECK(be16(tx.frame + 17) == (comfort_now ? 0x96 + 50 : 0x78 + 50));
+    CHECK(tx.frame[20] == (comfort_now ? 0x21 : 0x20));
+  }
   float c = 0;
   const Bytes answer = {0x7E, 0x80, 0xD5, 0x10, 0x81, 0x03, 0x02, 0x03, 0x2E};
   CHECK(decode_body_live(answer.data(), answer.size(), c) && fabsf(c - 81.4f) < 0.01f);

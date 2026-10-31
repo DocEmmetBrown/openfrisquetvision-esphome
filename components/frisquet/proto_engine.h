@@ -28,6 +28,7 @@ struct EngineStats {
   uint32_t zone_bursts = 0;
   uint32_t zone_writes_acked = 0;
   uint32_t zone_writes_failed = 0;
+  uint32_t consignes_sent = 0;  // direct consigne exchanges in the satellite name
 };
 
 // Life of a hot-water mode write: queued, sent until the boiler acknowledges, then read back.
@@ -106,6 +107,9 @@ class ConnectEngine {
   void on_zone_broadcast(uint8_t zone_index, uint8_t mode_raw, float setpoint, uint8_t weekday, uint8_t hour_bcd,
                          uint8_t minute_bcd) {
     if (zone_index >= 3 || !zone_known_[zone_index] || zone_confirmed_[zone_index] || zone_write_pending()) return;
+    // The answer to our own direct consigne shows our setpoint, not the satellite's: it proves nothing about the block
+    // (seen 31/10 12:37: it made a restored block look stale and erased it).
+    if (last_page_own_) return;
     switch (check_block_against_broadcast(zone_block_[zone_index], mode_raw, setpoint, weekday, hour_bcd, minute_bcd)) {
       case BlockCheck::kConsistent:
         zone_confirmed_[zone_index] = true;
@@ -140,6 +144,11 @@ class ConnectEngine {
     zone_fields_ = fields;
     zone_index_ = zone_index;
     zone_state_ = WriteState::kQueued;
+    // Zone 1 with satellite_override: also the consigne, directly, for an immediate effect (DESIGN 10.25).
+    if (zone_index == 0 && policy_.satellite_override && policy_.satellite_association != 0xFF) {
+      direct_active_ = true;
+      direct_wanted_ = true;
+    }
     return true;
   }
   // Mode: 0x05 auto, 0x06 comfort, 0x07 reduced, 0x08 frost protection. The options byte follows the MQTT firmware's
@@ -188,6 +197,25 @@ class ConnectEngine {
 
   // Every validated frame. Returns true when it completes the running read.
   bool on_frame(uint32_t now_ms, const uint8_t *payload, size_t length, ReadResult &result) {
+    {
+      SatelliteBroadcast page;
+      Header h;
+      const bool broadcast = decode_satellite_broadcast(payload, length, page);
+      if ((broadcast || decode_status_read(payload, length, page)) && parse_header(payload, length, h)) {
+        memcpy(page_, payload + 7, sizeof(page_));
+        page_known_ = true;
+        // Ours: the id of either attempt of our last consigne exchange.
+        last_page_own_ = broadcast && consigne_sent_ && static_cast<uint8_t>(h.message_id - consigne_id_) <= 1 &&
+                         now_ms - consigne_ms_ < 30000;
+        page_ms_ = now_ms;
+        page_seconds_ = clock_.seconds(now_ms);
+        // The satellite's own exchange (not the answer to ours) may have put its old consigne back.
+        if (broadcast && direct_active_ && !last_page_own_) {
+          direct_wanted_ = true;
+          direct_urgent_ = true;
+        }
+      }
+    }
     if (is_zone_relay(payload, length, policy_.self_id) && length <= sizeof(relay_)) {
       memcpy(relay_, payload, length);
       relay_length_ = length;
@@ -293,6 +321,16 @@ class ConnectEngine {
       return true;
     }
 
+    if (direct_active_ && !zone_write_pending()) {
+      direct_active_ = false;  // the satellite has the block (or the write ended): it sends the right consigne itself
+      direct_wanted_ = false;
+    }
+    if (direct_wanted_ && !consigne_pending_) {
+      direct_wanted_ = false;
+      uint8_t data[8];
+      if (direct_consigne_(now_ms, zone_request_, data)) request_satellite_consigne(data, direct_urgent_);
+      direct_urgent_ = false;
+    }
     if (!transaction_.active()) {
       schedule_(now_ms);
       if (!start_next_(now_ms)) return false;
@@ -376,11 +414,59 @@ class ConnectEngine {
   bool explore_pending() const { return explore_pending_; }
 
   // One consigne exchange in the name of the zone 1 satellite (8 data bytes, see build_satellite_consigne).
-  bool request_satellite_consigne(const uint8_t *data) {
+  bool request_satellite_consigne(const uint8_t *data, bool urgent = false) {
     if (!policy_.satellite_override || policy_.satellite_association == 0xFF || !data || consigne_pending_) return false;
     memcpy(consigne_data_, data, 8);
     consigne_pending_ = true;
+    consigne_urgent_ = urgent;
     enqueue_front_(ReadKind::kSatelliteConsigne);
+    return true;
+  }
+  bool direct_active() const { return direct_active_; }
+
+  // The consigne the satellite should send for `block` now (zone 1), from the last state page: ambient, mode byte and
+  // following word copied, active setpoint resolved (in Auto from the programme at the boiler's time). False when it
+  // cannot be computed, or when the page already shows it.
+  bool direct_consigne_(uint32_t now_ms, const uint8_t *block, uint8_t *data) const {
+    if (!page_known_ || !clock_.known() || now_ms - page_ms_ > 15UL * 60UL * 1000UL) return false;
+    const uint16_t comfort = static_cast<uint16_t>(block[0] + 50);
+    const uint16_t reduced = static_cast<uint16_t>(block[1] + 50);
+    const uint16_t frost = static_cast<uint16_t>(block[2] + 50);
+    const uint8_t options = block[4];
+    uint16_t setpoint = 0;
+    uint8_t mode = 0;
+    switch (block[3]) {
+      case 0x06: setpoint = comfort; mode = 0x05; break;
+      case 0x07: setpoint = reduced; mode = 0x00; break;
+      case 0x08: setpoint = frost; mode = 0x10; break;
+      case 0x05: {
+        bool in_comfort;
+        if (options & 0x02) {
+          in_comfort = options & 0x01;
+          mode = static_cast<uint8_t>(0x26 | (in_comfort ? 0x01 : 0x00));
+        } else {
+          const uint32_t now_s = clock_.seconds(now_ms);
+          const uint32_t day_offset = now_s / 86400u - page_seconds_ / 86400u;
+          const uint8_t weekday = static_cast<uint8_t>((page_[11] + day_offset) % 7);
+          const uint32_t slot = (now_s % 86400u) / 1800u;
+          in_comfort = (block[6 + weekday * 6 + slot / 8] >> (slot % 8)) & 1;
+          mode = static_cast<uint8_t>(0x20 | (in_comfort ? 0x01 : 0x00));
+        }
+        setpoint = in_comfort ? comfort : reduced;
+        break;
+      }
+      default: return false;
+    }
+    const uint8_t *zone = page_ + 12;
+    if (be16(zone + 2) == setpoint && (zone[5] & ~0x04) == (mode & ~0x04)) return false;
+    data[0] = zone[0];
+    data[1] = zone[1];
+    data[2] = static_cast<uint8_t>(setpoint >> 8);
+    data[3] = static_cast<uint8_t>(setpoint & 0xFF);
+    data[4] = 0x00;
+    data[5] = mode;
+    data[6] = zone[6];
+    data[7] = zone[7];
     return true;
   }
   bool consigne_pending() const { return consigne_pending_; }
@@ -462,8 +548,24 @@ class ConnectEngine {
       zone_state_ = WriteState::kFailed;
       ++stats_.zone_writes_failed;
     }
+    // A direct consigne goes first. It waits for the end of the satellites' window too, unless it answers the
+    // satellite's own exchange, which has just ended (re-assertion).
+    const bool quiet = in_quiet_window(clock_.seconds(now_ms));
+    if (queue_length_ > 0 && queue_[0] == ReadKind::kSatelliteConsigne && (!quiet || consigne_urgent_)) {
+      for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
+      --queue_length_;
+      current_kind_ = ReadKind::kSatelliteConsigne;
+      consigne_pending_ = false;
+      consigne_urgent_ = false;
+      consigne_id_ = next_id_;
+      consigne_sent_ = true;
+      consigne_ms_ = now_ms;
+      transaction_.start_satellite_consigne(kIdZone1, policy_.satellite_association, next_id_, consigne_data_);
+      ++stats_.consignes_sent;
+      return true;
+    }
     // Reads and writes wait for the end of the satellites' window; acknowledgements never do.
-    if (in_quiet_window(clock_.seconds(now_ms))) return false;
+    if (quiet) return false;
     // A requested hot-water change goes before any queued read.
     if (write_state_ == WriteState::kQueued) {
       transaction_.start_hot_water_write(policy_.self_id, policy_.association, next_id_, requested_mode_,
@@ -487,15 +589,6 @@ class ConnectEngine {
     }
     if (queue_length_ == 0) return false;
     const ReadKind kind = queue_[0];
-    if (kind == ReadKind::kSatelliteConsigne) {
-      for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
-      --queue_length_;
-      current_kind_ = kind;
-      consigne_pending_ = false;
-      transaction_.start_satellite_consigne(kIdZone1, policy_.satellite_association, next_id_, consigne_data_);
-      ++stats_.reads_started;
-      return true;
-    }
     for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
     --queue_length_;
     uint16_t address = 0, words = 0;
@@ -546,6 +639,18 @@ class ConnectEngine {
   bool body_started_ = false;
   uint8_t consigne_data_[8] = {};
   bool consigne_pending_ = false;
+  bool consigne_urgent_ = false;
+  uint8_t consigne_id_ = 0;
+  bool consigne_sent_ = false;
+  uint32_t consigne_ms_ = 0;
+  bool last_page_own_ = false;
+  uint8_t page_[42] = {};
+  bool page_known_ = false;
+  uint32_t page_ms_ = 0;
+  uint32_t page_seconds_ = 0;
+  bool direct_active_ = false;
+  bool direct_wanted_ = false;
+  bool direct_urgent_ = false;
   uint32_t last_body_ms_ = 0;
   SlotSchedule temperature_slots_[kTemperatureSlots];
   SlotSchedule status_slots_[kStatusSlots];
