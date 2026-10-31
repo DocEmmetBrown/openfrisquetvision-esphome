@@ -64,7 +64,9 @@ Roadmap (DESIGN §10):
    - **OLED screen** of the Heltec V4.3 (0.96" SSD1306 128×64, I2C; check SDA/SCL/RST pins and the Vext power pin): zone mode,
      setpoint and ambient, burner, ECS mode, radio state.
    - **Home Assistant dashboard**: ready-to-paste Lovelace YAML (HA has no dashboard blueprints), plus optional automation
-     blueprints (e.g. timed derogation, ECS schedule).
+     blueprints (e.g. timed derogation, ECS schedule). Idea from philippemezzadri/frisquet-esphome (Eco Radio System, wired,
+     not applicable to Visio): expose an ESPHome **`climate` entity** (mode, target, ambient, « heating » action from the burner)
+     for a proper thermostat card, and use **`homeassistant` sensors** as inputs for phase 3 (outdoor temperature, ambient).
    - **Protocol reference**: done, [PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md) (standalone, to reimplement without this code).
 
 Zones 2 and 3 cannot be validated on air (this installation has zone 1 only).
