@@ -8,10 +8,11 @@ Everything needed to pick the project up again. Detailed history and measurement
 | Item | State |
 |---|---|
 | Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.17-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
-| Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes 20,0 / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
+| Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes **19,0** (set by the user on the satellite, 31/10 12:22) / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
+| Zone block on the board | **unknown** since 31/10 12:37: zone writes from HA are refused until a change is made on the satellite (any local change makes the boiler relay the block) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
-| Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
+| Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested); `satellite_override: true` + `satellite_association: 0xFA` (direct consigne with zone 1 writes) |
 | Git | branch `main`, **nothing pushed** |
 | Host tests | `tests/host/run.sh` → 846 checks, 0 failures |
 
@@ -25,9 +26,13 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-1. **Live burner state: done** (DESIGN 10.23). « Chaudière brûleur » follows the slope of the live heating-body temperature
-   `A05E` (read every 15 s), with ~30-45 s of lag; « Chaudière corps de chauffe (direct) » is the raw value. Possible follow-ups:
-   tune the thresholds over a few days of heating cycles; set `explore: false` once mapping is no longer needed.
+0. **First, when resuming** (needs the user at the satellite): relearn the zone block (a change on the satellite, e.g. comfort
+   19 → 19,5 → 19), then try the dual path (« Zone 1 consigne hors-gel » 8,5 from HA: `A029` setpoint `0x55` within seconds,
+   block echo at the satellite's slot, satellite shows 8,5), then back to 8,0. Logs of the last windows: `build/logs/frisq-*.log`.
+1. **Live burner state: done** (DESIGN 10.23 – 10.24). « Chaudière brûleur » = last flue snapshot > 40 °C while there is a heating
+   demand (state bit `0x08`; snapshots `79E6` at `:x3` and `7A02` at `:x8`), otherwise the slope of the live heating-body
+   temperature `A05E` (hot water, 30-45 s lag). Possible follow-ups: ignore the slope ~2 min after a heating demand ends; set
+   `explore: false` once mapping is no longer needed.
    Other open points: the satellite's own frames are never received, even at 467 kHz RX bandwidth (test below); the RSSI of
    short frames is meaningless (read it per packet).
    Tools: `dev/ofv_frames.py` (frame inventory), `dev/ofv_scan.py --split` + `dev/ofv_memmap.py` (memory map),
