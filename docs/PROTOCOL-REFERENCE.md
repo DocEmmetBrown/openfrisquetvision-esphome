@@ -419,6 +419,19 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 **Les trames émises par le satellite de référence n'ont jamais été reçues** par la carte (même bande élargie), seulement leurs effets
 (relais et réponses de la chaudière). Cause inconnue [à tester : satellite posé à côté de la carte].
 
+**Consigne directe [vérifié le 31/10/2026]** : un Connect peut faire lui-même l'échange du satellite, **en son nom** (source `08`,
+association du satellite, ici `FA`) :
+
+```
+80 08 FA <id> 01 17 A0 29 00 15 A0 2F 00 04 08 <ambiante:2> <consigne:2> 00 <mode> <mot suivant:2>     (23 octets)
+réponse : 08 80 FA <id> 81 17 2A <page A029 : 42 octets>
+```
+
+Recopier l'ambiante, le mode et le mot suivant de la page `A029` lue juste avant ; seule la consigne change. La chaudière l'applique
+**immédiatement** (réponse en 0,1 s, page `A029` à jour), jusqu'au prochain **échange régulier** du satellite (`:x0`), qui remet
+sa propre consigne ; les échanges intermédiaires (ambiante seule) ne la modifient pas. Pour un changement durable : consigne directe
+**et** bloc de zone au satellite (6.3), en réaffirmant la consigne directe après chaque échange régulier tant que le bloc n'a pas abouti.
+
 ---
 
 ## 10. Calendrier et temporisations

@@ -55,6 +55,13 @@ class ReadTransaction {
     frame_bits_ = frame_bits;
   }
 
+  // A consigne exchange in a satellite name: self_id is the zone id, the answer is the boiler state page.
+  void start_satellite_consigne(uint8_t zone_id, uint8_t association, uint8_t first_message_id, const uint8_t *data) {
+    start(zone_id, association, first_message_id, 0, 0);
+    kind_ = Kind::kSatelliteConsigne;
+    memcpy(block_, data, 8);
+  }
+
   bool active() const { return state_ == State::kRunning; }
   void abort() { state_ = State::kIdle; }
   bool done() const { return state_ == State::kDone; }
@@ -88,6 +95,9 @@ class ReadTransaction {
         break;
       case Kind::kHotWaterWrite:
         length = build_hot_water_mode_write(frame, capacity, self_id_, association_, message_id_, mode_, frame_bits_);
+        break;
+      case Kind::kSatelliteConsigne:
+        length = build_satellite_consigne(frame, capacity, self_id_, association_, message_id_, block_);
         break;
       default:
         length = build_zone_write(frame, capacity, self_id_, association_, message_id_, zone_id_, block_);
@@ -130,7 +140,7 @@ class ReadTransaction {
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
-  enum class Kind : uint8_t { kRead, kHotWaterWrite, kZoneWrite };
+  enum class Kind : uint8_t { kRead, kHotWaterWrite, kZoneWrite, kSatelliteConsigne };
   State state_ = State::kIdle;
   Kind kind_ = Kind::kRead;
   HotWaterMode mode_ = HotWaterMode::kUnknown;

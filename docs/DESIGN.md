@@ -587,6 +587,21 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   :20, :34) mais pendant notre fenêtre de silence (`:x9:30 – :x2:30`) : aucune rafale envoyée. À faire : émettre l'écriture en attente
   dès qu'on entend une réponse d'état hors créneau (satellite éveillé).
 
+### 10.25 Consigne directe au nom du satellite (31/10/2026 12:28 – 12:42)
+
+- Idée de l'utilisateur : écrire la consigne **directement** à la chaudière (effet immédiat) et, en parallèle, le bloc de zone au
+  satellite (qui l'adopte à son réveil).
+- `0.7.15` : option `satellite_override` + `satellite_association: 0xFA` ; classe d'émission `satellite-consigne` (source `08`,
+  association du satellite, `A029 x15` lu, `A02F x4` écrit : ambiante, consigne, `00`, mode, mot suivant recopié) vérifiée champ par
+  champ par la porte ; commande de test `SAT <16 hex>` sur l'entrée exploratoire. Tests hôte : 825 vérifications.
+- Essai : page `A029` lue (`00A9 0050 0010 00C6`), envoi de `00A9 0055 0010 00C6` (hors-gel 8,5 °C) à 12:37:46 : réponse de la chaudière
+  en 0,12 s et `A029` à **8,5 °C aussitôt**. Échange intermédiaire du satellite à 12:38:41 : inchangé. **Échange régulier de 12:40:06 :
+  le satellite remet 8,0 °C.** Une consigne directe tient donc jusqu'au prochain échange régulier (≤ 10 min).
+- Suite : double envoi (directe immédiate + bloc ; réaffirmer la directe après chaque échange régulier tant que le bloc n'a pas abouti).
+- Bouton « info » : il provoque un échange d'état du satellite (réponse de la chaudière entendue, « Chaudière horloge » mise à jour),
+  mais une rafale envoyée aussitôt après (12:33:53) n'a abouti qu'au créneau `:x4:37` (12:34:31) : le satellite n'écoute pas les
+  relais à ce moment-là, ou pas assez longtemps.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

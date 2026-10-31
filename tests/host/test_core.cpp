@@ -1803,6 +1803,54 @@ static void test_pairing() {
 // flame 10:54:35 - 10:56:30 (user), water opened ~10:53.
 static void test_burner() {
   using namespace frisquet;
+  // Consigne exchange in the name of the zone 1 satellite (31/10 test of direct setpoints).
+  {
+    const uint8_t data[8] = {0x00, 0xB2, 0x00, 0x55, 0x00, 0x10, 0x00, 0xC6};  // ambient 17.8, setpoint 8.5, Hors gel
+    uint8_t frame[32];
+    CHECK(build_satellite_consigne(frame, sizeof(frame), kIdZone1, 0xFA, 0x42, data) == 23);
+    const Bytes expected = {0x80, 0x08, 0xFA, 0x42, 0x01, 0x17, 0xA0, 0x29, 0x00, 0x15, 0xA0, 0x2F,
+                            0x00, 0x04, 0x08, 0x00, 0xB2, 0x00, 0x55, 0x00, 0x10, 0x00, 0xC6};
+    CHECK(Bytes(frame, frame + 23) == expected);
+    CHECK(satellite_consigne_address(kIdZone2) == 0xA034);
+    TxPolicy p;
+    p.level = TxLevel::kWrite;
+    p.dry_run = false;
+    p.association = 0xD5;
+    TxClass cls;
+    CHECK(evaluate_tx(p, frame, 23, nullptr, 0, &cls) == TxVerdict::kBlockedIdentity);  // no satellite association
+    CHECK(cls == TxClass::kSatelliteConsigne);
+    p.satellite_association = 0xFA;
+    CHECK(evaluate_tx(p, frame, 23) == TxVerdict::kBlockedLevel);  // override not allowed
+    p.satellite_override = true;
+    CHECK(evaluate_tx(p, frame, 23) == TxVerdict::kSend);
+    Bytes bad(frame, frame + 23);
+    bad[18] = 0x56;  // 8.6 C: not a 0.5 step
+    CHECK(evaluate_tx(p, bad.data(), bad.size()) == TxVerdict::kBlockedAddress);
+    bad.assign(frame, frame + 23);
+    bad[2] = 0xFB;  // another association
+    CHECK(evaluate_tx(p, bad.data(), bad.size()) == TxVerdict::kBlockedIdentity);
+    bad.assign(frame, frame + 23);
+    bad[11] = 0x34;  // zone 2 address from zone 1
+    CHECK(evaluate_tx(p, bad.data(), bad.size()) == TxVerdict::kBlockedAddress);
+
+    ConnectEngine e;
+    TxPolicy ep = engine_policy(TxLevel::kWrite, false);
+    e.set_policy(ep);
+    CHECK(!e.request_satellite_consigne(data));
+    ep.satellite_override = true;
+    ep.satellite_association = 0xFA;
+    e.set_policy(ep);
+    e.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x12, 0x57, 0x15);
+    CHECK(e.request_satellite_consigne(data) && !e.request_satellite_consigne(data));
+    TxRequest tx;
+    CHECK(e.poll(100, tx) && tx.kind == TxClass::kSatelliteConsigne && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[1] == 0x08 && tx.frame[2] == 0xFA && memcmp(tx.frame + 15, data, 8) == 0);
+    Bytes answer = F["payload_sat_broadcast_reduced"];  // 08 80 FA <id> 81 17 2A ...
+    answer[3] = tx.frame[3];
+    ReadResult result;
+    CHECK(e.on_frame(200, answer.data(), answer.size(), result) && result.kind == ReadKind::kSatelliteConsigne);
+    CHECK(!e.reading());
+  }
   float c = 0;
   const Bytes answer = {0x7E, 0x80, 0xD5, 0x10, 0x81, 0x03, 0x02, 0x03, 0x2E};
   CHECK(decode_body_live(answer.data(), answer.size(), c) && fabsf(c - 81.4f) < 0.01f);

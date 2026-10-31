@@ -31,7 +31,9 @@ CONFIG_SCHEMA = cv.typed_schema(
 
 async def to_code(config):
     if config[CONF_TYPE] == "explore":
-        var = await text.new_text(config, min_length=3, max_length=9, pattern="^[0-9A-Fa-f]{1,4} [0-9A-Fa-f]{1,2}$")
+        var = await text.new_text(
+            config, min_length=3, max_length=20, pattern="^([0-9A-Fa-f]{1,4} [0-9A-Fa-f]{1,2}|SAT [0-9A-Fa-f]{16})$"
+        )
     else:
         var = await text.new_text(config, min_length=84, max_length=84, pattern="^[0-9A-Fa-f]{84}$")
     await cg.register_component(var, config)

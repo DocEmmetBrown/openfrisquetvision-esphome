@@ -26,7 +26,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne };
 
 // Which parts of a zone block a write may change; everything else must equal the last known block.
 constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
@@ -43,6 +43,9 @@ struct TxPolicy {
   bool pairing = false;        // association confirmations allowed (YAML `pairing: true`)
   bool explore_reads = false;  // reads of addresses outside the whitelist allowed (YAML `explore: true`)
   bool live_body_reads = false;  // read the live heating-body temperature (0xA05E) every 15 s
+  // Consigne exchanges in the name of the zone 1 satellite (YAML satellite_override + its association byte).
+  bool satellite_override = false;
+  uint8_t satellite_association = 0xFF;
 };
 
 constexpr uint16_t kMaxReadWords = 0x40;
@@ -87,6 +90,26 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
         memcmp(expected, frame, kAssociationConfirmLength) != 0)
       return TxVerdict::kBlockedAddress;
     if (!policy.pairing) return TxVerdict::kBlockedLevel;
+    return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
+  }
+  if (header.type == kInit && !header.is_ack() && length == kSatelliteConsigneLength && header.source >= kIdZone1 &&
+      header.source <= kIdZone3) {
+    cls = TxClass::kSatelliteConsigne;
+    if (classified) *classified = cls;
+    if (header.destination != kIdBoiler || header.reception != 0x01 || header.source != kIdZone1 ||
+        policy.satellite_association == 0xFF || header.association != policy.satellite_association)
+      return TxVerdict::kBlockedIdentity;
+    const uint16_t address = satellite_consigne_address(header.source);
+    const uint8_t body[9] = {0xA0, 0x29, 0x00, 0x15, static_cast<uint8_t>(address >> 8),
+                             static_cast<uint8_t>(address & 0xFF), 0x00, 0x04, 0x08};
+    if (memcmp(frame + 6, body, sizeof(body)) != 0) return TxVerdict::kBlockedAddress;
+    const uint8_t *data = frame + 15;
+    const int16_t ambient = static_cast<int16_t>(be16(data));
+    const int16_t setpoint = static_cast<int16_t>(be16(data + 2));
+    // Plausible ambient 0..40 C, setpoint 5..30 C in 0.5 steps, byte 4 zero.
+    if (ambient < 0 || ambient > 400 || setpoint < 50 || setpoint > 300 || setpoint % 5 != 0 || data[4] != 0)
+      return TxVerdict::kBlockedAddress;
+    if (!policy.satellite_override) return TxVerdict::kBlockedLevel;
     return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
   }
   if (header.type == kRead && !header.is_ack()) {

@@ -288,6 +288,20 @@ static std::string format_network(const uint8_t *n) {
 
 bool FrisquetRadio::request_explore_read(const std::string &request) {
 #ifdef FRISQUET_TX_ENABLED
+  if (request.rfind("SAT ", 0) == 0) {
+    // "SAT <16 hex digits>": one consigne exchange in the name of the zone 1 satellite (8 data bytes).
+    uint8_t data[8];
+    if (request.size() != 20 || !parse_hex(request.c_str() + 4, data, 8)) {
+      ESP_LOGW(TAG, "SAT request refused: expected 'SAT' and 16 hexadecimal digits");
+      return false;
+    }
+    if (!this->engine_.request_satellite_consigne(data)) {
+      ESP_LOGW(TAG, "SAT request refused (satellite_override off, or one already pending)");
+      return false;
+    }
+    ESP_LOGI(TAG, "SAT consigne queued: %s", format_hex_pretty(data, 8).c_str());
+    return true;
+  }
   unsigned address = 0, words = 0;
   if (sscanf(request.c_str(), "%x %x", &address, &words) != 2 || address > 0xFFFF) {
     ESP_LOGW(TAG, "EXPLORE request '%s' refused: expected 'ADDR WORDS' in hexadecimal", request.c_str());
@@ -542,6 +556,8 @@ void FrisquetRadio::setup() {
   policy.association = this->association_;
   policy.explore_reads = this->explore_allowed_;
   policy.live_body_reads = this->live_body_reads_;
+  policy.satellite_override = this->satellite_association_ != 0xFF;
+  policy.satellite_association = this->satellite_association_;
   if (this->tx_level_ >= 3)
     policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints | ::frisquet::kZoneFieldMode | ::frisquet::kZoneFieldProgram;
   this->engine_.set_policy(policy);
@@ -822,6 +838,9 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
       }
       break;
     }
+    case ::frisquet::ReadKind::kSatelliteConsigne:
+      ESP_LOGI(TAG, "SAT consigne answered by the boiler: %s", format_hex_pretty(frame, length).c_str());
+      break;
     case ::frisquet::ReadKind::kStatus: {
       ::frisquet::SatelliteBroadcast status;
       if (::frisquet::decode_status_read(frame, length, status)) {

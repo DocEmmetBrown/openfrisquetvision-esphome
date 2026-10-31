@@ -128,6 +128,7 @@ class FrisquetRadio : public Component {
   void set_pairing_allowed(bool value) { pairing_allowed_ = value; }
   void set_explore_allowed(bool value) { explore_allowed_ = value; }
   void set_live_body_reads(bool value) { live_body_reads_ = value; }
+  void set_satellite_override(uint8_t association) { satellite_association_ = association; }
   // "ADDR WORDS" in hexadecimal, e.g. "7A00 1C": one exploratory read, logged as "EXPLORE 7A00+1C: ...".
   bool request_explore_read(const std::string &request);
   // Pairing on the broadcast network (30 s, the boiler must be in pairing mode). False when it cannot start.
@@ -209,6 +210,7 @@ class FrisquetRadio : public Component {
   bool pairing_allowed_{false};
   bool explore_allowed_{false};
   bool live_body_reads_{false};
+  uint8_t satellite_association_{0xFF};
   ::frisquet::BurnerFusion burner_;
   int last_burner_{-1};
   void publish_burner_();

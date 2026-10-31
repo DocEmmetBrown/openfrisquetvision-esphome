@@ -133,4 +133,32 @@ inline size_t build_hot_water_mode_write(uint8_t *out, size_t capacity, uint8_t 
   return kHotWaterModeWriteLength;
 }
 
+// A satellite consigne exchange, sent in its name (source = zone id, its association): read A029 x15, write
+// A02F + 5 * (zone - 1) x4 = ambient (2), active setpoint (2), 00, mode byte, last word (8 data bytes). The boiler
+// answers at once with the 42-byte state page (08 80 <assoc> <id> 81 17 2A ...). Format from OpenFrisquetVisio.
+constexpr size_t kSatelliteConsigneLength = 23;
+
+inline uint16_t satellite_consigne_address(uint8_t zone_id) {
+  return static_cast<uint16_t>(0xA02F + 5 * (zone_id - kIdZone1));
+}
+
+inline size_t build_satellite_consigne(uint8_t *out, size_t capacity, uint8_t zone_id, uint8_t association,
+                                       uint8_t message_id, const uint8_t *data) {
+  if (!out || !data || capacity < kSatelliteConsigneLength || zone_id < kIdZone1 || zone_id > kIdZone3) return 0;
+  Header h;
+  h.destination = kIdBoiler;
+  h.source = zone_id;
+  h.association = association;
+  h.message_id = message_id;
+  h.reception = 0x01;
+  h.type = kInit;
+  write_header(out, h);
+  const uint16_t address = satellite_consigne_address(zone_id);
+  const uint8_t body[9] = {0xA0, 0x29, 0x00, 0x15, static_cast<uint8_t>(address >> 8),
+                           static_cast<uint8_t>(address & 0xFF), 0x00, 0x04, 0x08};
+  memcpy(out + 6, body, sizeof(body));
+  memcpy(out + 15, data, 8);
+  return kSatelliteConsigneLength;
+}
+
 }  // namespace frisquet

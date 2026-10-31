@@ -374,6 +374,16 @@ class ConnectEngine {
     return true;
   }
   bool explore_pending() const { return explore_pending_; }
+
+  // One consigne exchange in the name of the zone 1 satellite (8 data bytes, see build_satellite_consigne).
+  bool request_satellite_consigne(const uint8_t *data) {
+    if (!policy_.satellite_override || policy_.satellite_association == 0xFF || !data || consigne_pending_) return false;
+    memcpy(consigne_data_, data, 8);
+    consigne_pending_ = true;
+    enqueue_front_(ReadKind::kSatelliteConsigne);
+    return true;
+  }
+  bool consigne_pending() const { return consigne_pending_; }
   // True once after an exploratory read ended without an answer (unanswered, refused, blocked or dry run).
   bool take_explore_failed() {
     const bool failed = explore_failed_;
@@ -477,6 +487,15 @@ class ConnectEngine {
     }
     if (queue_length_ == 0) return false;
     const ReadKind kind = queue_[0];
+    if (kind == ReadKind::kSatelliteConsigne) {
+      for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
+      --queue_length_;
+      current_kind_ = kind;
+      consigne_pending_ = false;
+      transaction_.start_satellite_consigne(kIdZone1, policy_.satellite_association, next_id_, consigne_data_);
+      ++stats_.reads_started;
+      return true;
+    }
     for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
     --queue_length_;
     uint16_t address = 0, words = 0;
@@ -525,6 +544,8 @@ class ConnectEngine {
   bool explore_failed_ = false;
   bool explore_refused_ = false;
   bool body_started_ = false;
+  uint8_t consigne_data_[8] = {};
+  bool consigne_pending_ = false;
   uint32_t last_body_ms_ = 0;
   SlotSchedule temperature_slots_[kTemperatureSlots];
   SlotSchedule status_slots_[kStatusSlots];
