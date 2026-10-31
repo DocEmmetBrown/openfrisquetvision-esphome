@@ -962,6 +962,49 @@ static void test_zone_write() {
   CHECK(e.stats().zone_bursts == bursts);  // no more sends once echoed
   CHECK(e.request_zone_setpoints(0, 0x8C, 0x78, 0x1E));  // a new write is possible
 
+  // Changed on the satellite while we write (31/10: comfort 19.0 set by hand while we wrote 20.0): local wins.
+  {
+    ConnectEngine l;
+    l.set_policy(p);
+    l.set_next_message_id(0x80);
+    l.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x54, 0x30);
+    l.on_frame(100, known.data(), known.size(), result);
+    CHECK(l.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+    uint32_t lt = 1000;
+    for (; lt < 3000; lt += 100) l.poll(lt, tx);
+    CHECK(l.zone_write_state() == WriteState::kSending);
+    Bytes local = known;
+    local[15] = 0x82;  // comfort 18.0, neither the old block nor ours
+    local[3] = 0x42;
+    l.on_frame(lt, local.data(), local.size(), result);
+    CHECK(l.zone_write_state() == WriteState::kSuperseded && !l.zone_write_pending());
+    CHECK(l.zone_block(0)[0] == 0x82);
+    CHECK(l.poll(lt + 10, tx) && tx.kind == TxClass::kZoneAck);  // the relay is still acknowledged
+    bool more = false;
+    for (uint32_t t = lt + 100; t < lt + 120000; t += 100)
+      if (l.poll(t, tx) && tx.kind == TxClass::kZoneWrite) more = true;
+    CHECK(!more);
+    CHECK(l.request_zone_setpoints(0, 0x96, 0x78, 0x1E));  // a new write starts from the local block
+  }
+  // The satellite relays our block (options normalised) before the echo: the write is done.
+  {
+    ConnectEngine r;
+    r.set_policy(p);
+    r.set_next_message_id(0x80);
+    r.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x54, 0x30);
+    r.on_frame(100, known.data(), known.size(), result);
+    CHECK(r.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
+    for (uint32_t t = 1000; t < 3000; t += 100) r.poll(t, tx);
+    Bytes ours = known;
+    ours[15] = 0x96;
+    ours[16] = 0x78;
+    ours[17] = 0x1E;
+    ours[19] ^= 0x04;  // the satellite flips 0x04 by itself
+    ours[3] = 0x43;
+    r.on_frame(3000, ours.data(), ours.size(), result);
+    CHECK(r.zone_write_state() == WriteState::kVerified && r.zone_block(0)[0] == 0x96);
+  }
+
   // Never echoed: bursts continue until the deadline, then failed (and the block stays as it was).
   ConnectEngine g;
   g.set_policy(p);

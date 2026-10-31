@@ -31,7 +31,13 @@ struct EngineStats {
 };
 
 // Life of a hot-water mode write: queued, sent until the boiler acknowledges, then read back.
-enum class WriteState : uint8_t { kIdle, kQueued, kSending, kAcked, kVerified, kFailed, kNotSent };
+// kSuperseded: a zone write abandoned because the satellite relayed a block changed locally meanwhile (local wins).
+enum class WriteState : uint8_t { kIdle, kQueued, kSending, kAcked, kVerified, kFailed, kNotSent, kSuperseded };
+
+// Same zone settings, ignoring the option bits the satellite rewrites by itself (0x04, 0x20, others not owned).
+inline bool same_zone_settings(const uint8_t *a, const uint8_t *b) {
+  return memcmp(a, b, 4) == 0 && ((a[4] ^ b[4]) & 0x13) == 0 && memcmp(a + 5, b + 5, kZoneBlockSize - 5) == 0;
+}
 
 struct TxRequest {
   uint8_t frame[64] = {};
@@ -186,9 +192,26 @@ class ConnectEngine {
       memcpy(relay_, payload, length);
       relay_length_ = length;
       ack_pending_ = true;
-      // A pending write owns the block: what the boiler relays meanwhile is the old one.
       const uint8_t index = payload[4] - kIdZone1;
-      if (!zone_write_pending() && index < 3) {
+      const uint8_t *relayed = payload + 15;
+      bool keep_write = zone_write_pending() && index == zone_index_;
+      if (keep_write && same_zone_settings(relayed, zone_request_)) {
+        // The satellite already has what we are writing: the write is done (normally the echo comes first).
+        zone_state_ = WriteState::kVerified;
+        ++stats_.zone_writes_acked;
+        keep_write = false;
+      } else if (keep_write && !same_zone_settings(relayed, zone_block_[index])) {
+        // Neither the old block nor ours: someone changed the zone on the satellite. Local wins, the write is dropped
+        // (seen on 31/10/2026: comfort set to 19.0 on the satellite while we were writing 20.0).
+        zone_state_ = WriteState::kSuperseded;
+        keep_write = false;
+      }
+      if (!keep_write && zone_writing_ && !zone_write_pending()) {
+        zone_writing_ = false;
+        transaction_.abort();
+      }
+      // While our write is pending, a relay of the old block changes nothing.
+      if (!keep_write && index < 3) {
         // The boiler repeats a relay until it is acknowledged: persist only what is new.
         if (!zone_known_[index] || memcmp(zone_block_[index], payload + 15, kZoneBlockSize) != 0) zone_dirty_ = true;
         memcpy(zone_block_[index], payload + 15, kZoneBlockSize);

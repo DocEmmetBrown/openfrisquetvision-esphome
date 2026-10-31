@@ -288,6 +288,11 @@ Règles indispensables :
   confort) reçoit l'écho mais aucun relais, et la diffusion ne change pas.
 - Le satellite normalise les options (`25` écrit → `21` relayé, `30` → `10`) : se resynchroniser sur le relais.
 - Une seule écriture de zone à la fois ; regrouper plusieurs changements dans un même bloc.
+- **Le réglage local l'emporte** : si la chaudière relaie pendant notre écriture un bloc différent de l'ancien et du nôtre, quelqu'un
+  a changé la zone sur le satellite ; abandonner l'écriture et adopter le relais (sinon on écrase son réglage). Un relais égal à notre
+  demande, aux bits d'options normalisés près (`0x04`, `0x20`), vaut confirmation.
+- Un appui sur le bouton « info » du satellite le réveille : envoyer l'écriture en attente **à ce moment-là**, même pendant la fenêtre
+  réservée aux satellites (sinon le réveil est perdu).
 
 ### 6.4 Relais de zone et accusé (obligatoire) **[vérifié]**
 

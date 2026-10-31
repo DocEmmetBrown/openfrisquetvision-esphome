@@ -576,7 +576,16 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   inchangées entre deux instantanés (`79E6` vers `:x2`, `7A02` vers `:x7:38`). Règle de l'utilisateur confirmée : fumées > 0 ⇒ brûleur.
 - `0.7.13` : `BurnerFusion` (`proto_burner.h`) : demande de chauffage ⇒ dernier instantané de fumées > 40 °C (lecture de `79E6` à
   `:03` en plus de `79F2`) ; sans demande ⇒ pente (eau chaude). Tests hôte : 800 vérifications.
-- Retour : Hors gel vérifié 12:14:41, confort 20,0 °C à suivre.
+- Retour : Hors gel vérifié 12:14:41.
+- **Conflit avec un réglage local** : pendant notre écriture « confort 20,0 », l'utilisateur a réglé le confort à 19,0 sur le satellite
+  (relais `8C` reçu et accusé à 12:22:35). Le moteur ignorait les relais pendant une écriture et aurait écrasé ce réglage :
+  arrêt d'urgence à 12:22:44, avant la rafale suivante. `0.7.14` : un relais différent de l'ancien bloc et de notre demande annule
+  l'écriture (état `superseded`, **le réglage local l'emporte**) ; un relais équivalent à notre demande (options normalisées) la
+  termine. Tests hôte : 809 vérifications. Après le redémarrage, le bloc restauré gardait 21,5 °C (périmé, non vérifiable en
+  Hors gel) : resynchronisé en écrivant 19,0 °C.
+- **Bouton « info » du satellite** (astuce de frisquet-bridge) : appuyé à ≈ 12:20, le satellite s'est réveillé (échanges à 12:20:07,
+  :20, :34) mais pendant notre fenêtre de silence (`:x9:30 – :x2:30`) : aucune rafale envoyée. À faire : émettre l'écriture en attente
+  dès qu'on entend une réponse d'état hors créneau (satellite éveillé).
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 

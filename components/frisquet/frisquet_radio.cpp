@@ -126,6 +126,7 @@ static const char *write_state_name(::frisquet::WriteState state) {
     case ::frisquet::WriteState::kVerified: return "verified";
     case ::frisquet::WriteState::kFailed: return "failed";
     case ::frisquet::WriteState::kNotSent: return "not-sent";
+    case ::frisquet::WriteState::kSuperseded: return "superseded";
     default: return "idle";
   }
 }
