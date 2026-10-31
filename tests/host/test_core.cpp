@@ -1807,6 +1807,40 @@ static void test_burner() {
   CHECK(n.feed(30000, 83.6f) == BurnerState::kOff);
   CHECK(n.feed(45000, 83.6f) == BurnerState::kOff);
 
+  // Heating (31/10 11:49 - 12:09, flame continuous from ~11:55): the body swings, the flue snapshots decide.
+  {
+    BurnerFusion f;
+    const float swings[] = {82.5f, 78.7f, 67.6f, 53.0f, 44.7f, 41.1f, 43.8f, 48.3f, 53.9f, 59.5f, 64.8f, 69.4f, 72.2f};
+    uint32_t ft = 0;
+    f.set_heating_demand(true);
+    f.feed_flue(0.0f);  // 11:52:55 snapshot, before the flame
+    for (float x : swings) f.feed_body(ft += 15000, x);
+    CHECK(f.state() == BurnerState::kOff);  // the slope would say on/off; the snapshot rules
+    f.feed_flue(122.0f);  // 11:57:55
+    for (float x : swings) {
+      f.feed_body(ft += 15000, x);
+      CHECK(f.state() == BurnerState::kOn);
+    }
+    // Demand over: the slope takes over (hot water).
+    f.set_heating_demand(false);
+    f.feed_body(ft += 15000, 72.0f);
+    f.feed_body(ft += 15000, 72.0f);
+    CHECK(f.state() == BurnerState::kOff);
+    f.feed_body(ft += 15000, 74.0f);
+    CHECK(f.state() == BurnerState::kOn);
+    BurnerFusion g2;
+    g2.set_heating_demand(true);
+    CHECK(g2.state() == BurnerState::kUnknown);  // no snapshot yet
+    g2.feed_flue(NAN);
+    CHECK(g2.state() == BurnerState::kUnknown);
+  }
+  {
+    float flue = 0;
+    const Bytes answer = {0x7E, 0x80, 0xD5, 0x10, 0x81, 0x03, 0x02, 0x09, 0x88};  // 0x0988 / 20
+    CHECK(decode_flue_snapshot(answer.data(), answer.size(), flue) && fabsf(flue - 122.0f) < 0.01f);
+    CHECK(classify_read_address(0x79E6) == ReadKind::kFlue);
+  }
+
   // Engine: one 0xA05E read every 15 s with the policy flag, none in the satellites' window.
   TxRequest tx;
   ConnectEngine e;
@@ -1829,6 +1863,24 @@ static void test_burner() {
   off.set_policy(engine_policy(TxLevel::kRead, true));
   off.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x57, 0x15);
   CHECK(!off.poll(0, tx));  // flag off: no live reads
+
+  // At :03, the second flue snapshot (0x79E6) follows the 0x79F2 read when live reads are on.
+  {
+    ConnectEngine s3;
+    s3.set_policy(p);
+    s3.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x52, 0x59);  // 2:59
+    bool flue = false;
+    for (uint32_t t = 0; t < 8000; t += 100)
+      if (s3.poll(t, tx) && be16(tx.frame + 6) == 0x79E6) flue = be16(tx.frame + 8) == 0x01;
+    CHECK(flue);
+    ConnectEngine s0;
+    s0.set_policy(engine_policy(TxLevel::kRead, true));
+    s0.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x52, 0x59);
+    flue = false;
+    for (uint32_t t = 0; t < 8000; t += 100)
+      if (s0.poll(t, tx) && be16(tx.frame + 6) == 0x79E6) flue = true;
+    CHECK(!flue);
+  }
 
   // The boiler clock is learnt from the first 0xA029 answer, without waiting for a broadcast.
   ConnectEngine ce;

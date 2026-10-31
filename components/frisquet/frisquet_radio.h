@@ -209,7 +209,9 @@ class FrisquetRadio : public Component {
   bool pairing_allowed_{false};
   bool explore_allowed_{false};
   bool live_body_reads_{false};
-  ::frisquet::BurnerDetector burner_;
+  ::frisquet::BurnerFusion burner_;
+  int last_burner_{-1};
+  void publish_burner_();
   ::frisquet::PairingSession pairing_;
   int last_pairing_state_{-1};
   ESPPreferenceObject network_pref_;

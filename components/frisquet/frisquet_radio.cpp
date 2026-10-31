@@ -808,9 +808,16 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
       float celsius = NAN;
       if (::frisquet::decode_body_live(frame, length, celsius)) {
         this->publish_(kHeatingBodyLive, celsius);
-        const ::frisquet::BurnerState state = this->burner_.feed(millis(), celsius);
-        if (this->burner_sensor_ != nullptr && state != ::frisquet::BurnerState::kUnknown)
-          this->burner_sensor_->publish_state(state == ::frisquet::BurnerState::kOn);
+        this->burner_.feed_body(millis(), celsius);
+        this->publish_burner_();
+      }
+      break;
+    }
+    case ::frisquet::ReadKind::kFlue: {
+      float celsius = NAN;
+      if (::frisquet::decode_flue_snapshot(frame, length, celsius)) {
+        this->burner_.feed_flue(celsius);
+        this->publish_burner_();
       }
       break;
     }
@@ -822,6 +829,8 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
                  status.hour, status.minute, status.second);
         this->boiler_state_ = ::frisquet::decode_boiler_state(status.state_raw);
         this->state_known_ = true;
+        this->burner_.set_heating_demand(this->boiler_state_.running);
+        this->publish_burner_();
         this->publish_text_(kBoilerState, this->boiler_state_.fault ? "Anomalie"
                                           : (this->boiler_state_.running ? "En marche" : "Veille"));
         this->publish_activity_();
@@ -830,6 +839,15 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
     }
     default: break;
   }
+}
+
+void FrisquetRadio::publish_burner_() {
+  const ::frisquet::BurnerState state = this->burner_.state();
+  if (this->burner_sensor_ == nullptr || state == ::frisquet::BurnerState::kUnknown) return;
+  const int on = state == ::frisquet::BurnerState::kOn ? 1 : 0;
+  if (on == this->last_burner_) return;
+  this->last_burner_ = on;
+  this->burner_sensor_->publish_state(on == 1);
 }
 
 void FrisquetRadio::publish_(SensorId id, float value) {
@@ -867,6 +885,8 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
 
   this->boiler_state_ = ::frisquet::decode_boiler_state(b.state_raw);
   this->state_known_ = true;
+  this->burner_.set_heating_demand(this->boiler_state_.running);
+  this->publish_burner_();
   this->publish_text_(kBoilerState, this->boiler_state_.fault ? "Anomalie"
                                     : (this->boiler_state_.running ? "En marche" : "Veille"));
   // The date is sent as BCD: 0x26 0x10 0x25 means 2026-10-25.
@@ -894,6 +914,8 @@ void FrisquetRadio::publish_info_(const ::frisquet::BoilerInfo &info) {
   this->publish_(kHeatingBody, info.heating_body);
   this->publish_(kOutdoor, info.outdoor);
   this->publish_(kFlue, info.flue);
+  this->burner_.feed_flue(info.flue);
+  this->publish_burner_();
   this->publish_(kZone1Flow, info.flow[0]);
   this->publish_(kZone1FlowSetpoint, info.flow_setpoint[0]);
   this->publish_(kPressure, info.pressure);

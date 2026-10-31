@@ -1,19 +1,19 @@
 # Resuming work (state at 31/10/2026 11:25)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.23); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
+(windows 10.1 → 10.24); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.12-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.13-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes 20,0 / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 778 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 800 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -57,8 +57,9 @@ Roadmap (DESIGN §10):
    documentation, first tag.
 8. **Open decisions**: pushing the repository; the upstream licence question (D6).
 9. **Features requested on 31/10** (not started):
-   - **Burner detection while heating**: test running on 31/10 (zone 1 Confort, comfort 21,5 °C) — the `A05E` slope may miss
-     a modulating burner with the pump running. Restore Hors gel and comfort 20,0 °C afterwards.
+   - **Burner detection while heating**: done 31/10 (DESIGN 10.24): heating demand ⇒ flue snapshot (> 40 °C, twice per
+     10 min), otherwise the body-temperature slope (hot water). Possible refinement: ignore the slope for ~2 min after a
+     heating demand ends (the body keeps rising when the pump stops).
    - **Merge zone requests**: a request made while a zone write is pending is refused today; merge it into the pending block
      (one write carrying mode + setpoint…), keeping echo matching correct.
    - **OLED screen** of the Heltec V4.3 (0.96" SSD1306 128×64, I2C; check SDA/SCL/RST pins and the Vext power pin): zone mode,
@@ -68,6 +69,17 @@ Roadmap (DESIGN §10):
      not applicable to Visio): expose an ESPHome **`climate` entity** (mode, target, ambient, « heating » action from the burner)
      for a proper thermostat card, and use **`homeassistant` sensors** as inputs for phase 3 (outdoor temperature, ambient).
    - **Protocol reference**: done, [PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md) (standalone, to reimplement without this code).
+   - **From frisquet-bridge** (markkvdb, MIT, same Visio protocol; PROTOCOL-REFERENCE §12):
+     - **Boiler pushes** `10`/`45` (reception `05`) when a setting is changed **on the boiler panel**, acknowledged by the
+       official Connect (reception `85`). Never seen here; we do not acknowledge them. Test: change a setting on the panel
+       during a capture; if they come (and repeat), add their acknowledgement to the engine and the gate.
+     - Tip for users: pressing the satellite's **info button** wakes it and makes a pending zone write land at once.
+     - `79E0` sensor block has more fields (DHW and heating power, **instantaneous DHW** at `79EC`, zone values).
+     - Control modes worth considering for phase 3: **virtual/simple satellite** (own zone 1 via the `A02F` consigne, ambient
+       from an HA sensor, physical satellite removed), **central boiler** (TRV demand → one switch), **flow temperature from HA**
+       (boiler in outdoor-only regulation, virtual outdoor temperature through the probe identity), outdoor-temperature
+       number entity.
+     - Their MIT licence may help the upstream-licence question (D6).
 
 Zones 2 and 3 cannot be validated on air (this installation has zone 1 only).
 

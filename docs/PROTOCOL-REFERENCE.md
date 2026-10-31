@@ -369,17 +369,19 @@ peut la lire directement en `A029 x15`, à tout moment.
 **Vérifier un bloc mémorisé** avec cette page : le mode et la consigne active doivent correspondre ; en Auto, la période (confort ou
 réduite) doit correspondre au programme à l'heure de la page (éviter les deux minutes autour d'une demi-heure).
 
-### 7.3 État du brûleur **[vérifié le 31/10/2026]**
+### 7.3 État du brûleur **[vérifié les 31/10/2026]**
 
-**Aucune trame ni aucune donnée lisible n'indique la flamme.** La seule information en direct est la **température du corps de
-chauffe en `A05E`** :
+**Aucune trame ni aucune donnée lisible n'indique la flamme en direct.** Deux sources partielles :
 
-- puisage d'eau chaude sans flamme : baisse d'environ 1,5 °C toutes les 14 s ;
-- flamme : hausse de 2 à 3,5 °C toutes les 12 à 15 s, avec ≈ 30 s d'inertie à l'allumage comme à l'extinction ;
-- au repos : stable, avec des pas de mesure de ≈ 0,5 °C.
+- **Fumées** (`7A02`, dans `79F2`, instantané vers `:x7` ; `79E6`, instantané vers `:x2` ; valeur ÷ 20) : ≈ 122 °C flamme allumée,
+  `0` éteinte. Exactes, mais deux fois par 10 minutes seulement.
+- **Corps de chauffe en direct** (`A05E`) : puisage d'eau chaude sans flamme, baisse de ≈ 1,5 °C / 14 s ; flamme, hausse de 2 à
+  3,5 °C / 12-15 s (≈ 30 s d'inertie) ; au repos, pas de mesure de ≈ 0,5 °C. **Inutilisable en chauffage** : avec la pompe vers les
+  radiateurs, il oscille de 15 à 40 °C en 1 à 3 minutes alors que la flamme reste allumée ; et il **monte encore** une minute
+  après l'arrêt de la pompe en fin de demande.
 
-Règle utilisée (lecture toutes les 15 s) : brûleur allumé si la hausse dépasse 1,0 °C en 15 s, éteint si elle est ≤ 0,1 °C.
-**Non encore validé en chauffage** (brûleur modulant, pompe en marche).
+Règle retenue : **demande de chauffage** (bit `0x08` de l'état `A029`) ⇒ brûleur = dernier instantané de fumées > 40 °C ;
+**sans demande** (le brûleur ne sert qu'à l'eau chaude) ⇒ brûleur = hausse du corps de chauffe ≥ 1,0 °C / 15 s (éteint à ≤ 0,1 °C).
 
 ### 7.4 Consommations
 
@@ -424,7 +426,7 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 | `:x4:37` | satellite Z1 | écoute des écritures de zone (créneau observé ici, propre à l'installation) |
 | `:03` à `:09`, chaque minute | Connect (ce dépôt) | lecture `A029` (horloge, état) |
 | toutes les 15 s hors fenêtre | Connect (ce dépôt) | lecture `A05E` (brûleur) |
-| `:x3`, `:x8` | Connect | lecture `79F2` |
+| `:x3`, `:x8` | Connect | lecture `79F2` (et `79E6` à `:x3`, fumées de l'instantané de `:x2`) |
 | `:05` de l'heure | Connect | `7A18`, `A063` |
 | `:07` de l'heure | Connect | `A0FC` |
 
@@ -448,10 +450,42 @@ sans rattrapage.
 
 ---
 
-## 12. Inconnu ou non vérifié
+## 12. Autres implémentations et divergences
 
+**[frisquet-bridge](https://github.com/markkvdb/frisquet-bridge)** (MIT, Python + modem RFM69, même chaudière Visio) apporte des
+observations faites sur d'autres installations, non vérifiées ici (**[bridge]**) :
+
+- **Poussées de la chaudière vers le Connect**, quand on change un réglage **sur le panneau de la chaudière** : réception `05`,
+  type **`10` (MEMORY_PUSH)** (`adresse:2 | taille:2 | données`, comme une réponse de lecture ; vu pour `A0F0`) ou **`45`
+  (BOILER_EVENT)** (21 octets `type | étiquette:3 | horodatage:4 | 13 octets`, étiquette `0A <appareil> <paramètre>`, émis 3 fois ;
+  vu au changement de la température maximale). Le Connect officiel les accuse : adresses permutées, même id, **réception `85`**,
+  même type, données vides (ou `adresse + taille` pour `10`). **Jamais observées ici** : nous ne les accusons pas encore ; à tester
+  en changeant un réglage sur le panneau.
+- Autres types : `43` (SONDE_INIT, avant les envois de la sonde, données `00 00`), `44` (émis par le Connect, données `0100`/`0200`,
+  sens inconnu). Chaudière à l'adresse **`84`** sur certaines installations (alors adresses mémoire `+ 0xC8`).
+- `79E0` (bloc « capteurs » complet) : en plus de ce qui figure en 7.1, **puissance ECS / chauffage** (mots 7 et 8), **ECS
+  instantanée** (mot 12, `79EC`), ambiantes, consignes de départ et consignes des zones, extérieure. Rafraîchi au rythme propre de la
+  chaudière (≈ 5 min, plus souvent brûleur allumé). `7A34` = consommation totale chez eux (illisible, `FFFF`, ici).
+- Le satellite se réveille plus souvent (toutes les deux minutes environ) pendant qu'on modifie la zone, et **un appui sur son bouton
+  « info » le réveille**, ce qui fait aboutir aussitôt une écriture de zone en attente.
+- Id de message du Connect officiel incrémenté de **4** à chaque requête.
+- **Pilotage par satellite virtuel** : prendre le rôle du satellite (`08`, son association) et écrire la consigne `A02F` directement
+  (réponse immédiate, pas d'attente de réveil), avec l'ambiante d'un capteur extérieur ; le satellite physique doit alors être retiré.
+- **Température de départ imposée** : chaudière en régulation « extérieure seule », la passerelle envoie (comme sonde `20`) la
+  température extérieure virtuelle pour laquelle la courbe de chauffe donne le départ voulu.
+
+**Divergence sur l'octet d'options** : le bridge écrit `10` (Auto suivant le programme), `20` (hors gel), `24` (réduit fixe),
+`25` (confort fixe), une dérogation étant « mode `05` + options fixes », **sans bit dérogation**. Ici, les écritures « dérogation »
+`…06` / `…07` (bit `0x02`) ont été acceptées et appliquées, diffusées `26` / `27`, et la normalisation du satellite (`25` → `21`,
+`30` → `10`) ne correspond pas à leur table. Les deux codages semblent acceptés ; partir du dernier relais reste la règle sûre.
+
+---
+
+## 13. Inconnu ou non vérifié
+
+- Poussées `10` / `45` de la chaudière (section 12) : jamais observées ici ; faut-il les accuser pour éviter une anomalie ?
 - Trames émises par les satellites et la sonde (formats [MQTT] seulement).
 - Zones 2 et 3, boost, chaudières d'une autre famille (`+ 0xC8`).
 - Octet 5 du bloc de zone, octets inconnus de la page `A029`, paramètres `793E – 7956`, identifiant `AE80 66D3`.
-- Détection du brûleur en chauffage (régulation modulante).
+- Détection du brûleur en chauffage plus rapide qu'un instantané de fumées toutes les 5 minutes.
 - Codes d'anomalie de la chaudière (seul le bit « anomalie » est connu).

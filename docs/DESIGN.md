@@ -565,6 +565,19 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - L'horloge de la chaudière est apprise à la première réponse `A029` (~3 min après un démarrage) au lieu d'attendre la diffusion
   (jusqu'à 10 min, pendant lesquelles les fenêtres satellite étaient décalées). Tests hôte : 778 vérifications.
 
+### 10.24 Brûleur en chauffage (31/10/2026 11:24 – 12:16)
+
+- Zone 1 : confort 21,5 °C (vérifié 11:34:33), Confort (11:44:33). Demande de chauffage (état `28`) à 11:49 seulement, la chaudière
+  affichant « Arrêt chauffage » entre-temps ; flamme continue d'avant 11:55 jusqu'à 12:15:25 (utilisateur).
+- **Corps de chauffe `A05E`** : oscille de 41 à 82 °C sur des cycles de 1 à 3 min, flamme allumée (retour des radiateurs) : le
+  détecteur à pente bascule ON/OFF toutes les minutes, **faux en chauffage**. En fin de demande (12:14:35, état `20`), il monte encore
+  d'≈ 6 °C après l'extinction (12:15:25) : arrêt de la pompe.
+- **Fumées** : 122,0 – 123,1 °C sur tous les instantanés pendant la chauffe ; relues toutes les 10 s (`7A02`, `79E6`) pendant 5 min :
+  inchangées entre deux instantanés (`79E6` vers `:x2`, `7A02` vers `:x7:38`). Règle de l'utilisateur confirmée : fumées > 0 ⇒ brûleur.
+- `0.7.13` : `BurnerFusion` (`proto_burner.h`) : demande de chauffage ⇒ dernier instantané de fumées > 40 °C (lecture de `79E6` à
+  `:03` en plus de `79F2`) ; sans demande ⇒ pente (eau chaude). Tests hôte : 800 vérifications.
+- Retour : Hors gel vérifié 12:14:41, confort 20,0 °C à suivre.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

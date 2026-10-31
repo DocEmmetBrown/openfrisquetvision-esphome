@@ -402,8 +402,11 @@ class ConnectEngine {
     }
     const uint32_t seconds = clock_.seconds(now_ms);
     for (size_t i = 0; i < kTemperatureSlots; ++i)
-      if (temperature_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kTemperatureOffsets[i]))
+      if (temperature_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kTemperatureOffsets[i])) {
         enqueue_(ReadKind::kInfo);
+        // At :03 also the flue snapshot taken around :x2 (0x79F2 carries the :x7 one): burner state while heating.
+        if (policy_.live_body_reads && i == 0) enqueue_(ReadKind::kFlue);
+      }
     for (size_t i = 0; i < kStatusSlots; ++i)
       if (status_slots_[i].due(seconds, now_ms, kSlotCycleSeconds, kStatusOffsets[i])) enqueue_(ReadKind::kStatus);
     if (consumption_slot_.due(seconds, now_ms, kConsumptionPeriod, kConsumptionOffset)) {
@@ -462,6 +465,7 @@ class ConnectEngine {
       case ReadKind::kStatus: address = kAddrStatus; words = 0x15; break;
       case ReadKind::kExplore: address = explore_address_; words = explore_words_; break;
       case ReadKind::kBody: address = kAddrBodyLive; words = 0x01; break;
+      case ReadKind::kFlue: address = kAddrFlueSnapshot; words = 0x01; break;
       default: return false;
     }
     current_kind_ = kind;
