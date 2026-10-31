@@ -23,6 +23,7 @@
 #include "proto_crc.h"
 #include "proto_decode.h"
 #include "proto_encode.h"
+#include "proto_burner.h"
 #include "proto_pairing.h"
 #include "proto_tracker.h"
 #include "proto_zone_store.h"
@@ -71,6 +72,7 @@ enum SensorId : uint8_t {
   kReadsFailed,
   kTxDryRuns,
   kTxBlocked,
+  kHeatingBodyLive,
   kSensorCount,
 };
 
@@ -125,6 +127,7 @@ class FrisquetRadio : public Component {
   // YAML `pairing: true`: association confirmations may be transmitted.
   void set_pairing_allowed(bool value) { pairing_allowed_ = value; }
   void set_explore_allowed(bool value) { explore_allowed_ = value; }
+  void set_live_body_reads(bool value) { live_body_reads_ = value; }
   // "ADDR WORDS" in hexadecimal, e.g. "7A00 1C": one exploratory read, logged as "EXPLORE 7A00+1C: ...".
   bool request_explore_read(const std::string &request);
   // Pairing on the broadcast network (30 s, the boiler must be in pairing mode). False when it cannot start.
@@ -205,6 +208,8 @@ class FrisquetRadio : public Component {
   uint8_t yaml_association_{0xFF};
   bool pairing_allowed_{false};
   bool explore_allowed_{false};
+  bool live_body_reads_{false};
+  ::frisquet::BurnerDetector burner_;
   ::frisquet::PairingSession pairing_;
   int last_pairing_state_{-1};
   ESPPreferenceObject network_pref_;

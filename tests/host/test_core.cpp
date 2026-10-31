@@ -14,6 +14,7 @@
 
 #include "../../components/frisquet/proto_crc.h"
 #include "../../components/frisquet/proto_decode.h"
+#include "../../components/frisquet/proto_burner.h"
 #include "../../components/frisquet/proto_engine.h"
 #include "../../components/frisquet/proto_pairing.h"
 #include "../../components/frisquet/proto_schedule.h"
@@ -1755,6 +1756,95 @@ static void test_pairing() {
   }
 }
 
+// Burner detection from the live heating-body temperature (0xA05E), replayed from the 2026-10-31 hot-water draw:
+// flame 10:54:35 - 10:56:30 (user), water opened ~10:53.
+static void test_burner() {
+  using namespace frisquet;
+  float c = 0;
+  const Bytes answer = {0x7E, 0x80, 0xD5, 0x10, 0x81, 0x03, 0x02, 0x03, 0x2E};
+  CHECK(decode_body_live(answer.data(), answer.size(), c) && fabsf(c - 81.4f) < 0.01f);
+  const Bytes wrong = {0x7E, 0x80, 0xD5, 0x10, 0x81, 0x03, 0x04, 0x03, 0x2E, 0x00, 0x00};
+  CHECK(!decode_body_live(wrong.data(), wrong.size(), c));
+  CHECK(classify_read_address(0xA05E) == ReadKind::kBody);
+
+  struct Sample { int s; float t; } samples[] = {
+      {33, 81.4f}, {44, 81.4f}, {55, 81.4f}, {69, 79.8f}, {85, 78.7f}, {99, 77.2f}, {113, 75.7f}, {127, 74.2f},
+      {138, 72.7f}, {152, 70.8f}, {165, 68.9f}, {180, 67.6f}, {194, 68.0f}, {215, 70.8f}, {226, 72.7f}, {237, 75.2f},
+      {251, 78.2f}, {262, 80.3f}, {273, 81.9f}, {284, 84.2f}, {296, 85.3f}, {311, 84.2f}, {325, 83.0f}, {342, 81.9f},
+      {353, 80.9f}, {365, 79.8f}, {379, 79.3f}, {390, 78.7f}, {403, 78.2f}, {417, 78.2f}};
+  BurnerDetector d;
+  int first_on = -1, first_off_after = -1;
+  for (const Sample &x : samples) {  // seconds after 10:52:00
+    const BurnerState st = d.feed(static_cast<uint32_t>(x.s) * 1000, x.t);
+    if (x.s == 33) CHECK(st == BurnerState::kUnknown);
+    if (st == BurnerState::kOn && first_on < 0) first_on = x.s;
+    if (first_on >= 0 && st == BurnerState::kOff && first_off_after < 0) first_off_after = x.s;
+  }
+  // Flame at 155 s (10:54:35): seen at 215 s, within the thermal lag; stop at 270 s: seen at 311 s.
+  CHECK(first_on == 215);
+  CHECK(first_off_after == 311);
+  CHECK(d.state() == BurnerState::kOff);
+
+  // A gap longer than 45 s (satellites' window) only sets a new reference, unless the temperature fell.
+  BurnerDetector g;
+  g.feed(0, 60.0f);
+  g.feed(15000, 60.0f);
+  CHECK(g.state() == BurnerState::kOff);
+  CHECK(g.feed(315000, 75.0f) == BurnerState::kOff);  // +15 C after 5 min: no conclusion
+  CHECK(g.feed(330000, 76.5f) == BurnerState::kOn);
+  CHECK(g.feed(345000, NAN) == BurnerState::kOn);
+  CHECK(g.feed(645000, 70.0f) == BurnerState::kOff);  // lower after the gap: off
+
+  // Second validation (31/10 11:08:20 - 11:09:45): on at the first big rise, a +0.6 C step at rest is noise.
+  BurnerDetector v;
+  const float rest[] = {67.6f, 65.7f, 64.8f, 66.6f};
+  uint32_t t = 0;
+  for (float x : rest) v.feed(t += 15000, x);
+  CHECK(v.state() == BurnerState::kOn);  // 64.8 -> 66.6
+  BurnerDetector n;
+  n.feed(0, 83.0f);
+  n.feed(15000, 83.0f);
+  CHECK(n.feed(30000, 83.6f) == BurnerState::kOff);
+  CHECK(n.feed(45000, 83.6f) == BurnerState::kOff);
+
+  // Engine: one 0xA05E read every 15 s with the policy flag, none in the satellites' window.
+  TxRequest tx;
+  ConnectEngine e;
+  TxPolicy p = engine_policy(TxLevel::kRead, true);
+  p.live_body_reads = true;
+  e.set_policy(p);
+  e.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x57, 0x15);  // 7:15 into the cycle: no other slot
+  int reads = 0;
+  for (uint32_t t = 0; t < 40000; t += 500)
+    if (e.poll(t, tx)) {
+      CHECK(be16(tx.frame + 6) == 0xA05E && be16(tx.frame + 8) == 0x01);
+      ++reads;
+    }
+  CHECK(reads == 3);  // 0, 15, 30 s (the :08 slot starts at 45 s)
+  ConnectEngine q;
+  q.set_policy(p);
+  q.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x50, 0x30);  // 0:30: quiet until 2:30
+  CHECK(!q.poll(0, tx) && !q.poll(60000, tx));
+  ConnectEngine off;
+  off.set_policy(engine_policy(TxLevel::kRead, true));
+  off.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x57, 0x15);
+  CHECK(!off.poll(0, tx));  // flag off: no live reads
+
+  // The boiler clock is learnt from the first 0xA029 answer, without waiting for a broadcast.
+  ConnectEngine ce;
+  ce.set_policy(engine_policy(TxLevel::kRead, false));
+  ReadResult result;
+  CHECK(!ce.clock().known());
+  CHECK(ce.poll(180000, tx) && be16(tx.frame + 6) == 0x79F2);  // uptime-based :03 slot
+  ce.on_frame(180050, with_id(F["payload_79f2_idle"], tx.frame[3]).data(), F["payload_79f2_idle"].size(), result);
+  CHECK(ce.poll(180100, tx) && be16(tx.frame + 6) == 0xA029);
+  Bytes status = F["payload_sat_broadcast_reduced"];  // 2026-10-25 22:10:12
+  const Bytes header = {0x7E, 0x80, 0xE3, tx.frame[3], 0x81, 0x03};
+  std::copy(header.begin(), header.end(), status.begin());
+  CHECK(ce.on_frame(180200, status.data(), status.size(), result) && result.kind == ReadKind::kStatus);
+  CHECK(ce.clock().known() && ce.clock().seconds(180200) % 600 == 12);  // 22:10:12 -> 12 s into the cycle
+}
+
 int main() {
   F = load_fixtures();
   test_header();
@@ -1785,6 +1875,7 @@ int main() {
   test_crc_repair();
   test_crc_valid_and_invalid();
   test_pairing();
+  test_burner();
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures ? 1 : 0;
 }

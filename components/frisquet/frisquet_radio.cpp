@@ -540,6 +540,7 @@ void FrisquetRadio::setup() {
   policy.self_id = ::frisquet::kIdConnect;
   policy.association = this->association_;
   policy.explore_reads = this->explore_allowed_;
+  policy.live_body_reads = this->live_body_reads_;
   if (this->tx_level_ >= 3)
     policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints | ::frisquet::kZoneFieldMode | ::frisquet::kZoneFieldProgram;
   this->engine_.set_policy(policy);
@@ -803,6 +804,16 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
                format_hex(frame + 7, data).c_str());
       break;
     }
+    case ::frisquet::ReadKind::kBody: {
+      float celsius = NAN;
+      if (::frisquet::decode_body_live(frame, length, celsius)) {
+        this->publish_(kHeatingBodyLive, celsius);
+        const ::frisquet::BurnerState state = this->burner_.feed(millis(), celsius);
+        if (this->burner_sensor_ != nullptr && state != ::frisquet::BurnerState::kUnknown)
+          this->burner_sensor_->publish_state(state == ::frisquet::BurnerState::kOn);
+      }
+      break;
+    }
     case ::frisquet::ReadKind::kStatus: {
       ::frisquet::SatelliteBroadcast status;
       if (::frisquet::decode_status_read(frame, length, status)) {
@@ -883,8 +894,6 @@ void FrisquetRadio::publish_info_(const ::frisquet::BoilerInfo &info) {
   this->publish_(kHeatingBody, info.heating_body);
   this->publish_(kOutdoor, info.outdoor);
   this->publish_(kFlue, info.flue);
-  if (this->burner_sensor_ != nullptr && !isnan(info.flue))
-    this->burner_sensor_->publish_state(::frisquet::burner_firing(info.flue));
   this->publish_(kZone1Flow, info.flow[0]);
   this->publish_(kZone1FlowSetpoint, info.flow_setpoint[0]);
   this->publish_(kPressure, info.pressure);

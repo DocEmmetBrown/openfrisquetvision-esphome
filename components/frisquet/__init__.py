@@ -121,6 +121,8 @@ SENSORS = {
     "reads_failed": _counter(),
     "tx_dry_runs": _counter(),
     "tx_blocked": _counter(),
+    # Live heating-body temperature (0xA05E, read every 15 s outside the satellites' window).
+    "heating_body_live": _temperature(),
 }
 
 # Same rule for the C++ TextId enum.
@@ -196,7 +198,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_PAIRING, default=False): cv.boolean,
         # Allows exploratory reads of any address (text entity of type `explore`), to map the boiler's memory.
         cv.Optional(CONF_EXPLORE, default=False): cv.boolean,
-        # Burner on: flue temperature (0x79F2 read) above 40 C. About 120 C while firing, 0 when stopped.
+        # Burner on: the live heating-body temperature rises (0xA05E every 15 s; ~30-40 s of thermal lag).
         cv.Optional(CONF_BURNER): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_HEAT),
         **{cv.Optional(key): schema for key, schema in SENSORS.items()},
         **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
@@ -237,6 +239,7 @@ async def to_code(config):
         cg.add(var.set_tx(level, config[CONF_DRY_RUN], config[CONF_ASSOCIATION]))
         cg.add(var.set_pairing_allowed(config[CONF_PAIRING]))
         cg.add(var.set_explore_allowed(config[CONF_EXPLORE]))
+        cg.add(var.set_live_body_reads(CONF_BURNER in config or "heating_body_live" in config))
 
     for index, key in enumerate(SENSORS):
         if key in config:

@@ -1,19 +1,19 @@
-# Resuming work (state at 29/10/2026 22:30)
+# Resuming work (state at 31/10/2026 11:25)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.22); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.23); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.10-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.12-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes 20,0 / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 752 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 778 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -25,17 +25,14 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-1. **Live burner state: one flame diff left** (DESIGN 10.18 – 10.22). Known: no frame on burner start/stop; `79F2`/`79E0` are
-   10-minute snapshots; `A029` is live but its state byte ignores a hot-water flame. The 352 readable words are mapped
-   (PROTOCOL « Carte mémoire »). To finish (~10 min, needs the user to draw hot water ~3 min outside :x9:30 – :x2:30):
-   `while true; do .venv/bin/python dev/ofv_scan.py flame2 --blocks 7919:1C 7935:1C 7951:15 79E0:1C 79FC:1C 7A18:1C 7A34:1C 9C40:1B A029:1C A045:1C A061:1C A07D:1C A099:03 A0F0:15; done`
-   then diff the passes before / during / after the flame. If nothing is live: rename « Chaudière brûleur » (snapshot at :x8) or
-   derive « chauffe depuis le dernier relevé » from the rise of the heating body / flow temperatures; then set `explore: false`.
-   Other open points: the satellite's own frames are never received, even at 467 kHz RX bandwidth (needs an on-site test, board
-   next to the satellite); the RSSI of short frames is meaningless (read it per packet).
+1. **Live burner state: done** (DESIGN 10.23). « Chaudière brûleur » follows the slope of the live heating-body temperature
+   `A05E` (read every 15 s), with ~30-45 s of lag; « Chaudière corps de chauffe (direct) » is the raw value. Possible follow-ups:
+   tune the thresholds over a few days of heating cycles; set `explore: false` once mapping is no longer needed.
+   Other open points: the satellite's own frames are never received, even at 467 kHz RX bandwidth (test below); the RSSI of
+   short frames is meaningless (read it per packet).
    Tools: `dev/ofv_frames.py` (frame inventory), `dev/ofv_scan.py --split` + `dev/ofv_memmap.py` (memory map),
    `dev/ofv_setpoints.sh` (chained zone writes, each verified), `dev/ofv_api.py get|set|select|text|press`.
-2. **Satellite tests with the user (planned for 30/10)**: the satellite runs on batteries and can be moved, no special functions.
+2. **Satellite tests with the user (planned, not done yet)**: the satellite runs on batteries and can be moved, no special functions.
    Start a capture (`esphome logs … > build/logs/frisq-sat.log`), then:
    - **Range**: bring the satellite next to the board and change a setting on it (it triggers an exchange at once). Look for
      `08 -> 80` frames with `python3 dev/ofv_frames.py build/logs/frisq-sat.log`. Received → it was range; decode what it writes

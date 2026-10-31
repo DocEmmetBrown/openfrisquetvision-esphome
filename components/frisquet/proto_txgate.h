@@ -42,6 +42,7 @@ struct TxPolicy {
   uint8_t zone_write_mask = 0; // kZoneField* bits a zone write may change (0: zone writes refused)
   bool pairing = false;        // association confirmations allowed (YAML `pairing: true`)
   bool explore_reads = false;  // reads of addresses outside the whitelist allowed (YAML `explore: true`)
+  bool live_body_reads = false;  // read the live heating-body temperature (0xA05E) every 15 s
 };
 
 constexpr uint16_t kMaxReadWords = 0x40;

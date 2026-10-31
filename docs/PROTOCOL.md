@@ -124,9 +124,9 @@ Une lecture est **refusée en entier** dès qu'un de ses mots est invalide (rép
 | Plage | Contenu (interprétation) |
 |---|---|
 | `7919 – 7965` | `791A – 791B` NetworkID `05D9 8DC9` ; `791C…` **table des associations** (`FA00`, `FA08` satellite Z1, `D57E` Connect, `FFFF` libres) ; `793A` identifiant `AE80 66D3` ; `793E – 7956` paramètres par circuit (`4B08 143C`, `4B0F 1450`… : bornes de départ ?) |
-| `79E0 – 7A4F` | deux **instantanés** de même structure (`79E0`, rafraîchi vers `:x2` ; `79FC`, vers `:x8`) : ECS, corps de chauffe, départs, fumées… ; `79F2` (ambiantes, consignes, extérieure) ; `7A18` (consommations aux mots 9 et 10, toujours nulles ici) |
+| `79E0 – 7A4F` | deux **instantanés** de même structure (`79E0`, rafraîchi vers `:x2` ; `79FC`, vers `:x8`) : ECS, corps de chauffe, départs, fumées… ; `79F2` (ambiantes, consignes, extérieure) ; `7A18` (consommations aux mots 9 et 10, toujours nulles ici) ; `7A16` compteur (+1 par seconde environ) |
 | `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure **en direct**, état et jour, NetworkID, `0080` (lu par la sonde extérieure) |
-| `A029 – A09B` | `A029` : **état en direct** (extérieure, date, état, zones ; voir la diffusion) ; `A041` : copie décalée ; `A05D` `00C6 0329` (80,9 °C : une consigne ?) ; `A063 – A09A` consommations annuelles (nulles) |
+| `A029 – A09B` | `A029` : **état en direct** (extérieure, date, état, zones ; voir la diffusion) ; `A041` : copie décalée ; **`A05E` = température du corps de chauffe en direct** (dixièmes de °C ; suit la flamme avec ~30 s d'inertie, voir DESIGN 10.23) ; `A063 – A09A` consommations annuelles (nulles) |
 | `A0F0 – A104` | `A0F8` identifiant `AE80 66D3` ; `A0FC` **mode ECS** |
 
 ## Échanges des autres appareils (d'après le firmware MQTT, non captés ici)
@@ -183,6 +183,7 @@ Toutes les trames reçues pendant une séance où le Connect a changé le mode E
 | diffusion `00`, type `41` | `02` | 11 | mode association | offre d'association (voir plus haut) |
 
 Rien d'autre : pas de trame liée au brûleur, aux puisages d'eau chaude ou aux changements de température.
+L'état du brûleur se déduit de la pente de `A05E` (lue toutes les 15 s) : aucune donnée « flamme » n'existe dans la mémoire lisible.
 
 **Consignes** (séance du 29/10/2026 16:53 – 17:34, zone en Hors gel ; confort, réduit, hors-gel modifiés de +0,5 °C puis rétablis) :
 chaque écriture ne change que son octet du bloc (`(t − 5) × 10` : `96`→`9B` = 20,0→20,5 ; `78`→`7D` = 17,0→17,5 ; `1E`→`23` = 8,0→8,5),

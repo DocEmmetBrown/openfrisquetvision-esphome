@@ -550,6 +550,21 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - **Phase 3** (étude du firmware MQTT) : sonde extérieure = appareil `0x20` à associer sur la chaudière, écrit `A029` toutes les 10 min ;
   satellite virtuel = écritures en `A02F`. Les deux modifient la régulation : rien d'émis sans accord.
 
+### 10.23 Brûleur en direct par la température du corps de chauffe (31/10/2026 10:49 – 11:23)
+
+- La carte a tourné 36 h sans intervention (2 083 lectures, 0 échec) avant la séance.
+- Relecture en boucle des 352 mots lisibles (32 passes) pendant un puisage, flamme 10:54:35 – 10:56:30 : seuls bougent les horloges
+  (`9C56`, `A02D`, `A047`), un compteur (`7A16`, ~1/s), les deux instantanés (`79E0` à :x2, `79FC` à :x7) et **`A05E`**, la
+  température du corps de chauffe **en direct** : −1,5 °C / 14 s pendant le puisage, +2 à +3 °C / 12 s flamme allumée (inertie ~30 s),
+  pic 85,3 °C 25 s après l'extinction, puis descente. Aucune donnée « flamme » dans la mémoire lisible.
+- `0.7.11` → `0.7.12` : lecture de `A05E` toutes les 15 s hors fenêtres satellite (`policy.live_body_reads`, activée si le capteur
+  `burner` ou `heating_body_live` est configuré) ; capteur « Chaudière corps de chauffe (direct) » ; **« Chaudière brûleur » =
+  pente** (`BurnerDetector`, `proto_burner.h`) : allumé à +1,0 °C / 15 s, éteint à +0,1 °C ou moins, une baisse après une fenêtre
+  satellite l'éteint. Validé sur un second puisage (flamme 11:08:20 → ON à 11:09:02 ; extinction dans la fenêtre satellite → OFF à
+  la première lecture, 11:12:40) ; un faux ON (+0,6 °C au repos, pas du capteur) a fait relever le seuil de 0,5 à 1,0.
+- L'horloge de la chaudière est apprise à la première réponse `A029` (~3 min après un démarrage) au lieu d'attendre la diffusion
+  (jusqu'à 10 min, pendant lesquelles les fenêtres satellite étaient décalées). Tests hôte : 778 vérifications.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

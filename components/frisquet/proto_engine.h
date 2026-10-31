@@ -226,6 +226,12 @@ class ConnectEngine {
       }
       result.length = transaction_.answer_length();
       memcpy(result.frame, transaction_.answer(), result.length);
+      if (current_kind_ == ReadKind::kStatus) {
+        // 0xA029 carries the boiler's live clock: no need to wait up to 10 minutes for a broadcast after a boot.
+        SatelliteBroadcast status;
+        if (decode_status_read(result.frame, result.length, status))
+          clock_.set_from_bcd(now_ms, status.year, status.month, status.day, status.hour, status.minute, status.second);
+      }
       ++stats_.reads_ok;
       if (result.kind == ReadKind::kHotWaterMode) {
         DecodedHotWaterMode decoded;
@@ -406,6 +412,13 @@ class ConnectEngine {
     }
     if (hot_water_slot_.due(seconds, now_ms, kHotWaterModePeriod, kHotWaterModeOffset))
       enqueue_(ReadKind::kHotWaterMode);
+    // The live heating-body temperature (burner detection), outside the satellites' window.
+    if (policy_.live_body_reads && !in_quiet_window(seconds) &&
+        (!body_started_ || now_ms - last_body_ms_ >= kBodyReadPeriodMs)) {
+      body_started_ = true;
+      last_body_ms_ = now_ms;
+      enqueue_(ReadKind::kBody);
+    }
   }
 
   bool start_next_(uint32_t now_ms) {
@@ -448,6 +461,7 @@ class ConnectEngine {
       case ReadKind::kHotWaterMode: address = kAddrHotWaterMode; words = 0x01; break;
       case ReadKind::kStatus: address = kAddrStatus; words = 0x15; break;
       case ReadKind::kExplore: address = explore_address_; words = explore_words_; break;
+      case ReadKind::kBody: address = kAddrBodyLive; words = 0x01; break;
       default: return false;
     }
     current_kind_ = kind;
@@ -483,6 +497,8 @@ class ConnectEngine {
   bool explore_pending_ = false;
   bool explore_failed_ = false;
   bool explore_refused_ = false;
+  bool body_started_ = false;
+  uint32_t last_body_ms_ = 0;
   SlotSchedule temperature_slots_[kTemperatureSlots];
   SlotSchedule status_slots_[kStatusSlots];
   SlotSchedule consumption_slot_;

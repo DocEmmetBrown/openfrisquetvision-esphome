@@ -4,6 +4,7 @@
 // earlier on the air. Pure C++17.
 #include <stdint.h>
 
+#include "proto_burner.h"
 #include "proto_codec.h"
 
 namespace frisquet {
@@ -18,7 +19,7 @@ constexpr uint16_t kAddrDate = 0xA02B;
 constexpr uint16_t kAddrStatus = 0xA029;         // what the satellite reads: outdoor, date, boiler state, zones
 constexpr uint16_t kAddrFamilyOffset = 0x00C8;
 
-enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate, kStatus, kExplore };
+enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate, kStatus, kExplore, kBody };
 
 inline ReadKind classify_read_address(uint16_t address) {
   switch (address) {
@@ -28,6 +29,7 @@ inline ReadKind classify_read_address(uint16_t address) {
     case kAddrHotWaterMode: return ReadKind::kHotWaterMode;
     case kAddrDate: return ReadKind::kDate;
     case kAddrStatus: return ReadKind::kStatus;
+    case kAddrBodyLive: return ReadKind::kBody;
     default: break;
   }
   if (address >= kAddrFamilyOffset) return classify_read_address(static_cast<uint16_t>(address - kAddrFamilyOffset));
