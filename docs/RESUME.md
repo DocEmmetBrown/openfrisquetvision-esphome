@@ -1,7 +1,7 @@
 # Resuming work (state at 31/10/2026 11:25)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.23); the radio protocol is in [PROTOCOL.md](PROTOCOL.md).
+(windows 10.1 → 10.23); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
 
 ## 1. Where things stand
 
@@ -56,6 +56,16 @@ Roadmap (DESIGN §10):
 7. **Phase 5**: dev tools, migration guide from the MQTT firmware, CI for the host tests, other boards (V3, LilyGo),
    documentation, first tag.
 8. **Open decisions**: pushing the repository; the upstream licence question (D6).
+9. **Features requested on 31/10** (not started):
+   - **Burner detection while heating**: test running on 31/10 (zone 1 Confort, comfort 21,5 °C) — the `A05E` slope may miss
+     a modulating burner with the pump running. Restore Hors gel and comfort 20,0 °C afterwards.
+   - **Merge zone requests**: a request made while a zone write is pending is refused today; merge it into the pending block
+     (one write carrying mode + setpoint…), keeping echo matching correct.
+   - **OLED screen** of the Heltec V4.3 (0.96" SSD1306 128×64, I2C; check SDA/SCL/RST pins and the Vext power pin): zone mode,
+     setpoint and ambient, burner, ECS mode, radio state.
+   - **Home Assistant dashboard**: ready-to-paste Lovelace YAML (HA has no dashboard blueprints), plus optional automation
+     blueprints (e.g. timed derogation, ECS schedule).
+   - **Protocol reference**: done, [PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md) (standalone, to reimplement without this code).
 
 Zones 2 and 3 cannot be validated on air (this installation has zone 1 only).
 

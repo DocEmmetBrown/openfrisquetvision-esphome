@@ -1,5 +1,7 @@
 # Protocole radio Frisquet (état des connaissances)
 
+Journal des découvertes. **Pour réimplémenter, lire plutôt [PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (référence autonome).
+
 Source : rétro-ingénierie d'OpenFrisquetVisio, vérifiée sur des trames réelles capturées le 25/10/2026
 (`tests/fixtures/frames.txt`). Tout ce qui n'est pas confirmé est marqué *(non vérifié)*.
 

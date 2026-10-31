@@ -1,0 +1,457 @@
+# Protocole radio Frisquet : référence pour une réimplémentation
+
+Ce document décrit tout ce qu'il faut savoir pour réimplémenter un « Connect » Frisquet (passerelle radio de la chaudière) sans
+refaire la rétro-ingénierie. Il est **autonome** : il ne suppose ni le code de ce dépôt, ni celui d'OpenFrisquetVisio.
+
+- Statut de chaque fait : **[vérifié]** = observé sur l'air ou testé sur la chaudière de référence (oct. 2026) ;
+  **[MQTT]** = repris du firmware OpenFrisquetVisio, non observé ici ; **[hypothèse]** = déduction non confirmée.
+- Installation de référence : chaudière Frisquet à une seule zone, satellite d'ambiance Z1 sans fil, pas de sonde extérieure,
+  carte Heltec WiFi LoRa 32 V4.3 (SX1262). NetworkID `05:D9:8D:C9`. Association du Connect `D5` (avant le 28/10 : `E3`).
+- Notation : octets en hexadécimal, mots de 16 bits **big-endian**, adresses mémoire en mots (`A029 x15` = 0x15 mots à partir de `A029`).
+- Historique et mesures détaillées : [DESIGN.md](DESIGN.md) §10 ; état des connaissances au fil de l'eau : [PROTOCOL.md](PROTOCOL.md) ;
+  trames réelles : [`tests/fixtures/frames.txt`](../tests/fixtures/frames.txt).
+
+---
+
+## 1. Couche physique
+
+| Paramètre | Valeur | Statut |
+|---|---|---|
+| Fréquence | 868,96 MHz | [vérifié] |
+| Modulation | 2-FSK, **sans mise en forme** (shaping none), codage NRZ, **sans blanchiment** | [vérifié] |
+| Débit | 25 kbit/s | [vérifié] |
+| Déviation | 50 kHz | [vérifié] |
+| Préambule | 16 bits (`0x55…`) | [vérifié] |
+| Mot de synchronisation | 4 octets = **NetworkID** de l'installation ; `FF FF FF FF` pendant une association | [vérifié] |
+| Format | longueur variable : `longueur (1)` + `données` + `CRC (2)` | [vérifié] |
+| Puissance d'émission | 10 dBm suffisent (chaudière à quelques mètres) | [vérifié] |
+| Bande de réception | 234,3 kHz (467 kHz n'apporte rien) | [vérifié] |
+
+### 1.1 Trame et CRC
+
+Après le mot de synchronisation : `L` (longueur des données, 6 à 63), les `L` octets de données, puis le CRC sur 2 octets, poids fort
+d'abord.
+
+**CRC-16** : polynôme `0x1021`, valeur initiale `0x1D0F`, sans réflexion, **résultat inversé** (`XOR 0xFFFF`), calculé sur
+**l'octet de longueur et les données**. C'est le CRC « CCITT » du SX126x configuré avec `init = 0x1D0F, inverted = true`.
+
+```c
+uint16_t crc = 0x1D0F;
+for (each byte b of [L, data...]) {
+  crc ^= b << 8;
+  for (int i = 0; i < 8; i++) crc = (crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0);
+}
+crc ^= 0xFFFF;   // émis poids fort d'abord
+```
+
+Vecteurs de test (octets sur l'air après le mot de synchronisation) :
+
+| Trame | Octets |
+|---|---|
+| lecture `79F2` | `0A 80 7E D5 88 01 03 79 F2 00 1C EB A6` |
+| réponse `A0FC` | `09 7E 80 D5 8B 81 03 02 00 90 AA EA` |
+| confirmation d'association | `0A 80 7E D5 D4 82 41 05 D9 8D C9 91 1D` |
+
+### 1.2 Réception : glissements de bit **[vérifié]**
+
+Les trames de la chaudière arrivent parfois avec **un bit `0` en trop ou en moins** au milieu d'une longue suite de zéros (champs
+nuls des réponses). Un CRC matériel les rejetterait. La méthode qui fonctionne :
+
+1. recevoir en **longueur fixe de 68 octets**, CRC matériel désactivé (on capture longueur, données, CRC et un peu de bruit) ;
+2. vérifier le CRC en logiciel ; s'il est faux, pour chaque suite d'au moins 16 bits nuls **après l'en-tête**, essayer d'y insérer
+   puis d'y retirer un `0`, et recalculer ;
+3. accepter si **un seul** candidat distinct est valide ; plusieurs candidats différents ⇒ rejet.
+
+Ordre de grandeur : quelques trames réparées par heure, aucune fausse réparation observée. Conséquence de la capture en 68 octets :
+le RSSI lu après coup est celui du bruit pour une trame courte (≈ −100 dBm), et non celui de la trame (≈ −75 dBm). Lire le RSSI
+pendant la réception si on en a besoin.
+
+### 1.3 Émission
+
+Repasser en **longueur variable avec CRC matériel** (mêmes paramètres de CRC) pour émettre, puis revenir en réception. Attendre
+**≈ 30 ms** après la fin d'une trame reçue avant de répondre (comme le firmware d'origine).
+
+---
+
+## 2. En-tête (6 octets)
+
+| Octet | Champ | Description |
+|---|---|---|
+| 0 | destinataire | identifiant de l'appareil (voir 2.1) |
+| 1 | émetteur | idem |
+| 2 | association | octet d'association **de l'appareil non-chaudière** de l'échange (le Connect ou le satellite) |
+| 3 | id de message | choisi par l'initiateur ; la réponse reprend le même |
+| 4 | réception | `01` message direct ; sinon **destinataire ou origine finale** d'un relais ; `+0x80` = réponse/accusé |
+| 5 | type | `03` lecture, `17` échange (lecture et écriture), `41` association ; **`+0x80` = refus/erreur** |
+
+### 2.1 Identifiants **[vérifié sauf indication]**
+
+| Id | Appareil |
+|---|---|
+| `80` | chaudière |
+| `7E` | Connect (la passerelle à réimplémenter) |
+| `08`, `09`, `0A` | satellites des zones 1, 2, 3 (`09`, `0A` [MQTT]) |
+| `20` | sonde extérieure [MQTT] |
+| `00` | diffusion (offre d'association) |
+
+### 2.2 Octet de réception
+
+- `01` : message direct entre l'émetteur et le destinataire.
+- `08`/`09`/`0A` ou `7E` : la chaudière **relaie** un message : vers le Connect, `réception` = zone d'origine ; vers un satellite,
+  `réception` = `7E` (origine Connect).
+- `+0x80` : réponse (`81` à un message direct, `88` à un relais de la zone 1, `FE` = `7E + 80` relayé vers le satellite, `82`…).
+
+### 2.3 Octet d'association et id de message
+
+- Chaque appareil reçoit son octet d'association de la chaudière lors de l'appariement (section 3). La chaudière ignore
+  vraisemblablement les trames portant une autre association que celle enregistrée pour l'émetteur [hypothèse : non testé].
+- Le satellite de la zone 1 utilise `FA` sur l'installation de référence ; la chaudière l'utilise aussi dans ses trames vers lui.
+- L'id de message est incrémenté par l'initiateur ; les relais et diffusions de la chaudière ont leur propre compteur. Une réponse
+  peut porter l'id d'une émission **antérieure** de la même opération (cas des écritures de zone, 6.3).
+
+---
+
+## 3. Réseau et association
+
+### 3.1 NetworkID
+
+Les 4 octets du mot de synchronisation sont propres à l'installation et ne changent pas lors d'une association. Ils figurent en
+mémoire en `791A – 791B` (section 8). Sans eux, on n'entend rien : il faut soit les connaître, soit écouter une offre d'association.
+
+### 3.2 Offre d'association **[vérifié le 28/10/2026]**
+
+Côté chaudière : « Partenaires > Ajouter > Connect », jusqu'au dernier OK. **Si un Connect est déjà associé, la chaudière répond
+aussitôt « terminé » sans rien émettre** : il faut d'abord « Partenaires > Effacer > Connect ».
+
+Environ **7 s** après le dernier OK, sur le mot de synchronisation **`FF FF FF FF`**, la chaudière émet (11 octets) :
+
+```
+<dest> 80 <assoc> <id> <réception> 41 04 <NetworkID:4>
+00     80 D5      D4   02          41 04 05 D9 8D C9        (exemple réel)
+```
+
+`assoc` est le **nouvel octet d'association** attribué. Le destinataire (`00`) et la réception (`02`) n'ont pas besoin d'être vérifiés.
+
+### 3.3 Confirmation
+
+Toujours sur `FF FF FF FF`, répondre **10 fois à 30 ms d'intervalle** par l'en-tête de réponse suivi du NetworkID, **sans octet de
+longueur** dans les données :
+
+```
+80 <soi> <assoc> <id> <réception|80> 41 <NetworkID:4>
+80 7E    D5      D4   82             41 05 D9 8D C9         (10 octets)
+```
+
+Puis revenir sur le NetworkID et utiliser `assoc` dans toutes les trames suivantes. La chaudière affiche OK et répond aussitôt aux
+lectures portant la nouvelle association.
+
+**Récupérer seulement le NetworkID** : écouter une offre sans y répondre. Il faut donc que la chaudière en émette une : supprimer
+d'abord le Connect (3.2), ou lancer « Remplacer Satellite Z1 » puis annuler sur la chaudière [MQTT].
+
+**Piège** : quel que soit le résultat (offre reçue, délai écoulé, annulation), **toujours revenir** sur le NetworkID de
+l'installation ; rester sur `FF FF FF FF` coupe le Connect de la chaudière.
+
+---
+
+## 4. Lectures (type `03`)
+
+### 4.1 Requête et réponse **[vérifié]**
+
+```
+requête : 80 7E <assoc> <id> 01 03 <adresse:2> <taille en mots:2>          (10 octets)
+réponse : 7E 80 <assoc> <id> 81 03 <longueur:1> <données: 2 × taille>
+refus   : 7E 80 <assoc> <id> 81 83 02                                        (7 octets)
+```
+
+- **La réponse ne contient pas l'adresse** : on l'apparie à la requête par (destinataire, id de message).
+- Taille maximale utile : `0x1C` mots (56 octets de données, trame de 63 octets).
+- **Refus** (type `83`) : l'adresse n'existe pas ou n'est pas lisible. **Une lecture est refusée en entier dès qu'un seul de ses
+  mots est invalide** : pour cartographier, découper les blocs refusés jusqu'au mot.
+- Une autre famille de chaudières répondrait aux mêmes données à l'adresse `+ 0x00C8` [MQTT].
+
+### 4.2 Répétition **[vérifié, temporisation du firmware d'origine]**
+
+Émettre **5 fois à 2,2 s d'intervalle** sous le même id ; sans réponse, une seconde tentative sous l'id suivant ; échec après ≈ 22 s.
+Un refus `83` termine la lecture immédiatement.
+
+### 4.3 Adresses connues
+
+| Adresse | Taille | Contenu | Rafraîchissement |
+|---|---|---|---|
+| `79F2` | `1C` | températures, consignes, pression, état (section 7.1) | **instantané** pris à `:x3` (zones) et `:x8` (chaudière) |
+| `79E0`, `79FC` | `1C` | deux instantanés de même structure que `79FC…` (ECS, corps de chauffe, départs, fumées, pression…) | `:x2` et `:x7`/`:x8` |
+| `7A18` | `1C` | consommations journalières : ECS au mot 9, chauffage au mot 10 (kWh) | [vérifié : toujours 0 ici] |
+| `A029` | `15` | **état partagé en direct** : extérieure, date, état chaudière, zones (section 7.2) | **en direct** |
+| `A02B` | `06` | date et heure (partie de la page `A029`) | en direct |
+| `A05E` | `01` | **température du corps de chauffe en direct** (dixièmes de °C) | en direct |
+| `A063` | `18` | consommations mensuelles de l'année : chauffage puis ECS pour chaque mois | [vérifié : 0 ici] |
+| `A07B` | `18` | même chose, année précédente | [vérifié : 0 ici] |
+| `A0FC` | `01` | **mode ECS** (section 6.1) | en direct |
+| `9C54` | `04` | date et heure en direct (lue par la sonde extérieure) | en direct |
+| `A154` | — | bloc de zone : **illisible** (refus `83`) ; on ne le connaît que par les relais | — |
+
+---
+
+## 5. Échanges (type `17`)
+
+Forme générale (un échange **lit** une plage et en **écrit** une autre dans la même trame) :
+
+```
+80 <émetteur> <assoc> <id> <réception> 17 <adr. lue:2> <taille lue:2> <adr. écrite:2> <taille écrite:2> <long.:1> <données écrites>
+```
+
+La réponse (`réception | 80`, type `17`) porte `<longueur:1>` et **les données lues**. Exemples : l'écriture du mode ECS relit le même
+mot ; un satellite lit `A029` et écrit sa température ambiante (section 9) ; les écritures de zone portent le bloc (`A154`).
+
+---
+
+## 6. Commandes du Connect
+
+### 6.1 Mode ECS (eau chaude sanitaire) **[vérifié, les 6 modes]**
+
+```
+80 7E <assoc> <id> 01 17 A0 FC 00 01 A0 FC 00 01 02 00 <mode>              (17 octets)
+réponse : 7E 80 <assoc> <id> 81 17 02 00 <mode relu>                         (9 octets)
+```
+
+| Mode | Octet (bits `0x7E`) | Valeur complète observée |
+|---|---|---|
+| Max | `00` | `80` |
+| Eco | `08` | `88` |
+| Eco Horaires | `10` | `90` |
+| Eco+ | `18` | `98` |
+| Eco+ Horaires | `20` | `A0` |
+| Stop | `28` | `A8` |
+
+Les bits `0x81` (« bits de trame », `0x80` ici) doivent être **recopiés tels que lus** dans `A0FC` ; ne pas les inventer : lire
+`A0FC` avant la première écriture. Vérifier l'écriture en relisant `A0FC` (la réponse donne déjà la valeur relue). Délai : < 1 s.
+
+### 6.2 Bloc de zone (48 octets) **[vérifié]**
+
+| Octet | Champ | Codage |
+|---|---|---|
+| 0 | consigne confort | `(t − 5,0) × 10` : `96` = 20,0 °C ; 5,0 à 30,0 °C par 0,5 |
+| 1 | consigne réduit | idem (`78` = 17,0) |
+| 2 | consigne hors-gel | idem (`1E` = 8,0) ; contrainte : hors-gel ≤ réduit ≤ confort |
+| 3 | mode | `05` Auto, `06` Confort, `07` Réduit, `08` Hors gel |
+| 4 | options | bits ci-dessous |
+| 5 | inconnu | `00` observé ; **ne jamais le modifier** |
+| 6 – 47 | programme | 7 jours × 6 octets, **dimanche d'abord** ; 48 demi-heures par jour, bit 0 de l'octet 0 = 00:00 – 00:30 ; `1` = confort |
+
+Bits de l'octet d'options :
+
+| Bit | Sens |
+|---|---|
+| `0x01` | confort (période ou demande) |
+| `0x02` | **dérogation** (Auto seulement) |
+| `0x04` | Auto [MQTT] ; **valeur sans signification en lecture** : le satellite le met ou l'enlève à sa guise |
+| `0x10` | hors gel |
+| `0x20` | indicateur posé par le satellite (« compatible Connect ») ; à conserver |
+| `0x40` | boost [MQTT, non testé] |
+
+Valeur à écrire pour chaque choix (les autres bits sont conservés depuis le dernier bloc connu) :
+
+| Choix | Mode | Options (bits `0x17`) |
+|---|---|---|
+| Auto | `05` | `04` + bit confort courant |
+| Dérogation Confort | `05` | `07` (`04 | 02 | 01`) |
+| Dérogation Réduit | `05` | `06` (`04 | 02`) |
+| Confort | `06` | `01` |
+| Réduit | `07` | `00` |
+| Hors gel | `08` | `10` |
+
+### 6.3 Écriture d'un bloc de zone **[vérifié]**
+
+```
+80 7E <assoc> <id> 08 17 A1 54 00 18 A1 54 00 18 30 <bloc:48>             (63 octets, réception = zone 08/09/0A)
+```
+
+Séquence observée sur l'air :
+
+1. Le Connect émet des **rafales de 5 trames à 2,2 s** sous un même id ; sans réponse, une nouvelle rafale sous un **nouvel id**
+   30 s plus tard. Abandon après ≈ 20 min.
+2. La chaudière relaie chaque trame au satellite (`08 80 FA <id> 7E 17 A1 54 …`, réception `7E`).
+3. Le satellite n'écoute qu'**autour de son créneau** (`:x4:37` sur l'installation de référence, toutes les 10 min) ; parfois plus
+   tôt. Acceptation **entre quelques secondes et ≈ 10 min** après la demande.
+4. **Écho** : `7E 80 <assoc> <id> 88 17 30 <bloc:48>` (55 octets) ; l'id peut être celui d'une rafale précédente. C'est la preuve
+   que la chaudière l'a transmis.
+5. Si le satellite **change effectivement** quelque chose (mode ou consigne **active**), il renvoie son bloc normalisé : relais
+   `7E 80 <assoc> <id'> 08 17 A1 54 00 15 A1 54 00 18 30 <bloc>` (section 6.4), à accuser.
+
+Règles indispensables :
+
+- Le bloc **n'est pas lisible** : partir **toujours du dernier bloc relayé** par la chaudière, ne changer que le champ voulu, et
+  conserver tous les autres octets (dont l'octet 5 et les bits d'options non concernés). Le persister (le Connect peut redémarrer).
+- Après un redémarrage, ne pas écrire tant que le bloc mémorisé n'est pas confirmé par un relais ou par une diffusion cohérente
+  (section 7.2) : un bloc périmé écraserait les réglages faits sur le satellite entre-temps.
+- **L'écho ne prouve pas que le satellite applique la valeur** : une dérogation sans effet (Dérogation Confort pendant une période de
+  confort) reçoit l'écho mais aucun relais, et la diffusion ne change pas.
+- Le satellite normalise les options (`25` écrit → `21` relayé, `30` → `10`) : se resynchroniser sur le relais.
+- Une seule écriture de zone à la fois ; regrouper plusieurs changements dans un même bloc.
+
+### 6.4 Relais de zone et accusé (obligatoire) **[vérifié]**
+
+Quand un satellite écrit son bloc (réglage local, ou normalisation après notre écriture), la chaudière le relaie au Connect :
+
+```
+7E 80 <assoc> <id> 08 17 A1 54 00 15 A1 54 00 18 30 <bloc:48>             (63 octets)
+```
+
+Le Connect **doit accuser** par l'écho exact du bloc :
+
+```
+80 7E <assoc> <id> 88 17 30 <bloc:48>                                      (55 octets, même id, réception 08 | 80)
+```
+
+Sans accusé, la chaudière **répète le relais toutes les ≈ 4 s** et finit par signaler **« anomalie avec Connect »** (bit 0 de l'état,
+vu après ≈ 11 h sans Connect actif). La chaudière relaie ensuite l'accusé au satellite (`08 80 FA <id> FE 17 30 <bloc>`).
+
+**Minimum vital d'un Connect** : accuser ces relais. Lire, c'est du confort.
+
+---
+
+## 7. Données
+
+Températures : mots signés en dixièmes de °C ; **`04F6` (127,0) et `050A` (129,0) = capteur absent**.
+
+### 7.1 Réponse `79F2` (56 octets de données) **[vérifié]**
+
+| Octets | Champ | Exemple |
+|---|---|---|
+| 0, 2, 4 | ambiante Z1, Z2, Z3 | `00 BA` = 18,6 °C |
+| 6, 8, 10 | consigne de départ Z1, Z2, Z3 | `00 C6` = 19,8 °C |
+| 12, 14, 16 | consigne d'ambiance active Z1, Z2, Z3 | `00 C8` = 20,0 °C |
+| 18 | extérieure | `05 0A` = absente |
+| 20 | ECS | `02 E6` = 74,2 °C |
+| 22 | corps de chauffe | `03 0E` = 78,2 °C |
+| 24, 26, 28 | départ Z1, Z2, Z3 | `01 20` = 28,8 °C |
+| 30 | sonde de sécurité | `01 40` = 32,0 °C |
+| 32 | fumées, **valeur ÷ 2** | `09 99` → 122,85 °C brûleur allumé ; `00 00` à l'arrêt |
+| 34, 36 | puissance ECS, chauffage | toujours 0 ici |
+| 40 | pression, ÷ 5120 bar | `1C 00` = 1,40 bar |
+| 42 | état de fonctionnement | bits 0-1 : `01` radiateurs, `11` ECS |
+
+C'est un **instantané** : les valeurs de zone changent à `:x3`, celles de la chaudière (dont les fumées) à `:x8`. Une chauffe
+courte entre deux instantanés n'y laisse aucune trace.
+
+### 7.2 Bloc d'état partagé `A029` (42 octets) **[vérifié]**
+
+C'est la page commune lue par les satellites (leur « diffusion »), où chaque appareil écrit sa propre mesure.
+
+| Octets | Mot | Champ |
+|---|---|---|
+| 0 | `A029` | température extérieure (écrite par la sonde) |
+| 2 | `A02A` | inconnu (`0000`) |
+| 4 – 9 | `A02B – A02D` | date BCD `AA MM JJ hh mm ss` |
+| 10 | `A02E` (fort) | **état chaudière** : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 demande de chauffage (`28`) / veille (`20`) |
+| 11 | `A02E` (faible) | jour de la semaine, 0 = dimanche |
+| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), inconnu (1), **mode diffusé** (1), puis 2 mots [hypothèse : départ et consigne de départ] |
+
+Le bit 3 de l'état semble suivre la **demande de chauffage des zones**, pas la flamme : une flamme d'eau chaude le laisse à `20`
+[hypothèse forte : vu `28` zone en Confort brûleur allumé, `20` pendant les puisages].
+
+**Mode diffusé** (octet d'options normalisé par le satellite ; bit `0x04` à ignorer) **[vérifié le 29/10]** :
+
+| Valeur (sans `0x04`) | Mode |
+|---|---|
+| `21` | Auto, période confort |
+| `20` | Auto, période réduite |
+| `23` | Auto, dérogation confort |
+| `22` | Auto, dérogation réduit |
+| `01` | Confort |
+| `00` | Réduit |
+| `10` (ou `30`) | Hors gel |
+
+Toutes les 10 minutes (`:x0:08` pour Z1), et après chaque changement de zone, la chaudière envoie cette page au satellite
+(`08 80 FA <id> 81 17 2A <42 octets>`, 49 octets) : c'est la réponse à l'échange périodique du satellite (section 9). Un Connect
+peut la lire directement en `A029 x15`, à tout moment.
+
+**Vérifier un bloc mémorisé** avec cette page : le mode et la consigne active doivent correspondre ; en Auto, la période (confort ou
+réduite) doit correspondre au programme à l'heure de la page (éviter les deux minutes autour d'une demi-heure).
+
+### 7.3 État du brûleur **[vérifié le 31/10/2026]**
+
+**Aucune trame ni aucune donnée lisible n'indique la flamme.** La seule information en direct est la **température du corps de
+chauffe en `A05E`** :
+
+- puisage d'eau chaude sans flamme : baisse d'environ 1,5 °C toutes les 14 s ;
+- flamme : hausse de 2 à 3,5 °C toutes les 12 à 15 s, avec ≈ 30 s d'inertie à l'allumage comme à l'extinction ;
+- au repos : stable, avec des pas de mesure de ≈ 0,5 °C.
+
+Règle utilisée (lecture toutes les 15 s) : brûleur allumé si la hausse dépasse 1,0 °C en 15 s, éteint si elle est ≤ 0,1 °C.
+**Non encore validé en chauffage** (brûleur modulant, pompe en marche).
+
+### 7.4 Consommations
+
+`7A18` (journalier, mots 9 et 10), `A063` / `A07B` (mensuel, année courante / précédente) existent mais valent 0 sur la chaudière
+de référence : elle ne les compte pas. Le format est celui du firmware MQTT (24 mots : chauffage puis ECS pour chaque mois).
+
+---
+
+## 8. Carte mémoire lisible **[vérifié, balayage mot à mot]**
+
+Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lisent (352 au total) :
+
+| Plage | Contenu |
+|---|---|
+| `7919 – 7965` | `791A – 791B` NetworkID ; `791C…` **table des associations** (`FA00`, `FA08` = satellite Z1, `D57E` = Connect, `FFFF` = libre) ; `793A – 793B` identifiant `AE80 66D3` ; `793E – 7956` paramètres par circuit [hypothèse : bornes de température de départ] |
+| `79E0 – 7A4F` | `79E0` et `79FC` : instantanés ; `79F2` (7.1) ; `7A16` compteur (+1/s) ; `7A18` consommations ; reste `FFFF` |
+| `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure en direct, état et jour, NetworkID, `0080` |
+| `A029 – A09B` | `A029` page d'état (7.2) ; `A041` copie décalée ; **`A05E` corps de chauffe en direct** ; `A063 – A09A` consommations |
+| `A0F0 – A104` | `A0F8 – A0F9` identifiant `AE80 66D3` ; **`A0FC` mode ECS** |
+
+---
+
+## 9. Les autres appareils
+
+| Appareil | Échange | Fréquence |
+|---|---|---|
+| Satellite zone z | lit `A029 x15`, écrit `A02F + 5 × (z − 1)` : 1 mot (ambiante) ou 4 mots (ambiante, consigne, mode) [MQTT] ; écrit son bloc de zone (`A154`) lors d'un réglage local [vérifié] | toutes les 10 min, Z1 à `:x0`, Z2 à `:x1`, Z3 à `:x2` [MQTT] |
+| Sonde extérieure (`20`) | lit `9C54 x4` (date), écrit `A029 x1` (température extérieure) [MQTT] | toutes les 10 min à `:x4` [MQTT] |
+
+**Les trames émises par le satellite de référence n'ont jamais été reçues** par la carte (même bande élargie), seulement leurs effets
+(relais et réponses de la chaudière). Cause inconnue [à tester : satellite posé à côté de la carte].
+
+---
+
+## 10. Calendrier et temporisations
+
+| Quand | Qui | Quoi |
+|---|---|---|
+| `:x9:30` – `:x2:30` | satellites | **fenêtre réservée** : le Connect n'émet que ses accusés |
+| `:x0:08` | chaudière → satellite Z1 | réponse d'état (page `A029`) |
+| `:x3`, `:x8` | chaudière | rafraîchissement de l'instantané `79F2` |
+| `:x4:37` | satellite Z1 | écoute des écritures de zone (créneau observé ici, propre à l'installation) |
+| `:03` à `:09`, chaque minute | Connect (ce dépôt) | lecture `A029` (horloge, état) |
+| toutes les 15 s hors fenêtre | Connect (ce dépôt) | lecture `A05E` (brûleur) |
+| `:x3`, `:x8` | Connect | lecture `79F2` |
+| `:05` de l'heure | Connect | `7A18`, `A063` |
+| `:07` de l'heure | Connect | `A0FC` |
+
+L'heure de référence est celle de la chaudière (lue dans `A029` ou dans la page envoyée au satellite). Une tentative par créneau,
+sans rattrapage.
+
+---
+
+## 11. Pièges (tous rencontrés)
+
+1. Ne pas accuser les relais de zone ⇒ « anomalie avec Connect » au bout de quelques heures.
+2. Rester sur le réseau `FF FF FF FF` après une association ratée ⇒ plus aucune communication.
+3. Écrire un bloc de zone reconstruit ou périmé ⇒ écrase programme et consignes du satellite. Toujours partir du dernier relais.
+4. Prendre l'écho d'une écriture de zone pour une preuve d'application.
+5. Décoder le mode diffusé avec le bit `0x04` (il varie sans raison) ; `05` sans `0x20` est **Confort**, pas « Auto confort ».
+6. Croire que `79F2` est en direct : c'est un instantané (fumées comprises).
+7. Lire par grands blocs une zone mémoire inconnue : un seul mot invalide fait refuser tout le bloc.
+8. Inventer les bits `0x81` du mode ECS au lieu de les relire.
+9. Après une ré-association, l'octet d'association change : l'ancien Connect (ou firmware) ne fonctionne plus sans être réassocié.
+10. Mesurer le RSSI après une capture de longueur fixe.
+
+---
+
+## 12. Inconnu ou non vérifié
+
+- Trames émises par les satellites et la sonde (formats [MQTT] seulement).
+- Zones 2 et 3, boost, chaudières d'une autre famille (`+ 0xC8`).
+- Octet 5 du bloc de zone, octets inconnus de la page `A029`, paramètres `793E – 7956`, identifiant `AE80 66D3`.
+- Détection du brûleur en chauffage (régulation modulante).
+- Codes d'anomalie de la chaudière (seul le bit « anomalie » est connu).
