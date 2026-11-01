@@ -147,7 +147,11 @@ class FrisquetRadio : public Component {
   void set_pairing_allowed(bool value) { pairing_allowed_ = value; }
   void set_explore_allowed(bool value) { explore_allowed_ = value; }
   void set_live_body_reads(bool value) { live_body_reads_ = value; }
-  void set_satellite_override(uint8_t association) { satellite_association_ = association; }
+  // Direct path in the zone 1 satellite's name; `association` 0xFF = learn it from the boiler's answers to it.
+  void set_satellite_override(uint8_t association) {
+    satellite_override_ = true;
+    satellite_association_ = association;
+  }
   // "ADDR WORDS" in hexadecimal, e.g. "7A00 1C": one exploratory read, logged as "EXPLORE 7A00+1C: ...".
   bool request_explore_read(const std::string &request);
   // Pairing on the broadcast network (30 s, the boiler must be in pairing mode). False when it cannot start.
@@ -220,7 +224,8 @@ class FrisquetRadio : public Component {
   void save_network_(uint8_t association);
   // True only when the radio really uses the installation's sync word and no pairing session runs.
   bool on_installation_network_() const {
-    return !pairing_.active() && memcmp(applied_network_, active_network_, 4) == 0;
+    return !pairing_.active() && ::frisquet::is_usable_network(active_network_) &&
+           memcmp(applied_network_, active_network_, 4) == 0;
   }
 #ifdef FRISQUET_TX_ENABLED
   void tx_step_(uint32_t now);
@@ -233,7 +238,7 @@ class FrisquetRadio : public Component {
 
   uint8_t cs_{8}, irq_{14}, reset_{12}, busy_{13}, sck_{9}, miso_{11}, mosi_{10};
   bool fem_{false};
-  uint8_t network_id_[4]{0, 0, 0, 0};       // from the YAML
+  uint8_t network_id_[4]{0xFF, 0xFF, 0xFF, 0xFF};  // from the YAML; broadcast = none (not paired yet)
   uint8_t active_network_[4]{0, 0, 0, 0};   // the installation's network: YAML, or learned by pairing
   uint8_t applied_network_[4]{0, 0, 0, 0};  // the sync word the radio currently uses
   bool network_learned_{false};
@@ -242,6 +247,8 @@ class FrisquetRadio : public Component {
   bool explore_allowed_{false};
   bool live_body_reads_{false};
   uint8_t satellite_association_{0xFF};
+  bool satellite_override_{false};
+  uint8_t last_satellite_association_{0xFF};
   ::frisquet::BurnerFusion burner_;
   int last_burner_{-1};
   void publish_burner_();

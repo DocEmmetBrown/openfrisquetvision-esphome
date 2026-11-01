@@ -1,0 +1,50 @@
+blueprint:
+  name: Frisquet - notification d'alerte
+  description: >-
+    Envoie une notification quand la chaudière Frisquet signale une anomalie ou une nouvelle alerte
+    (pile du satellite, événement de la chaudière).
+  domain: automation
+  input:
+    anomalie:
+      name: Capteur d'anomalie
+      default: binary_sensor.frisquet_chaudiere_anomalie
+      selector:
+        entity:
+          domain: binary_sensor
+    alerte:
+      name: Capteur de dernière alerte
+      default: sensor.frisquet_chaudiere_derniere_alerte
+      selector:
+        entity:
+          domain: sensor
+    notification:
+      name: Service de notification
+      description: "Par exemple notify.mobile_app_mon_telephone"
+      default: notify.notify
+      selector:
+        text:
+
+mode: queued
+trigger:
+  - platform: state
+    entity_id: !input anomalie
+    to: "on"
+    id: anomalie
+  - platform: state
+    entity_id: !input alerte
+    id: alerte
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.id == 'anomalie' or (trigger.to_state.state not in ['Aucune', 'unknown', 'unavailable', '']
+         and trigger.from_state is not none and trigger.from_state.state not in ['unknown', 'unavailable']) }}
+variables:
+  notification: !input notification
+  alerte: !input alerte
+action:
+  - action: "{{ notification }}"
+    data:
+      title: Chaudière Frisquet
+      message: >-
+        {% if trigger.id == 'anomalie' %}Anomalie signalée par la chaudière : {{ states(alerte) }}
+        {% else %}{{ trigger.to_state.state }}{% endif %}

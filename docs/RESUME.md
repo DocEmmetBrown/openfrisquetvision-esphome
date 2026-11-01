@@ -1,20 +1,23 @@
 # Resuming work (state at 01/11/2026 13:40)
 
+**Users**: see [README.md](../README.md) and `frisquet.yaml` (production configuration, nothing installation-specific).
+This page is for development.
+
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.34); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
+(windows 10.1 → 10.35); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.140`) | **ESPHome `0.7.34-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.140`) | **ESPHome `0.7.35-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes **19,0** (set by the user on the satellite, 31/10 12:22) / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Zone block on the board | confirmed; Hors gel block taken by the satellite 01/11 13:37:07, verified (state `20`, mode `10`) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `21`** since 01/11 21:33 (re-paired with version 01 21 01 02; was `D5`; `dev/phase-2d-associate.yaml` says `0x21`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested); `satellite_override: true` + `satellite_association: 0xFA` (direct consigne with zone 1 writes) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 947 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 952 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 

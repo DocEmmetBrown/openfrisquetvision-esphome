@@ -765,6 +765,18 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   recherche (`0220 2101`) désignait sans doute l'appareil `20` (sonde extérieure). À relire plus tard ; surveiller
   l'arrivée de poussées `45`.
 
+### 10.35 Version de production (01/11/2026 21:40 – 21:50)
+
+- **Sans prérequis** : `network_id` et `association` sont optionnels (appris par l'association, gardés en flash) ; une carte
+  neuve démarre « non associée » (réseau de diffusion, aucune émission, `Radio réseau` = « non associé ») ; une session
+  d'association peut partir de cet état. `satellite_association` est apprise dans la réponse de la chaudière à l'échange du
+  satellite (`08 80 <assoc> …`) quand `satellite_override` est actif. 952 vérifications.
+- `frisquet.yaml` à la racine (Heltec V4.3, entités de production, logger INFO, écran), `secrets.yaml.example`,
+  `homeassistant/` (tableau de bord, blueprint de notification), README réécrit pour l'utilisateur.
+- Corrigé : `AUTO_LOAD` (sensor, text_sensor) et une configuration sans émission (`tx: none`) qui ne compilait plus (lecture
+  exploratoire). Vérifié : `frisquet.yaml`, une configuration minimale (écoute seule) et `dev/phase-2d-associate.yaml`
+  compilent ; la carte (0.7.35) garde son association `21`.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

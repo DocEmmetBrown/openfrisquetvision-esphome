@@ -420,8 +420,8 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 
 | Plage | Contenu |
 |---|---|
-| `7919 – 7965` | `791A – 791B` NetworkID ; `791C…` **table des associations** (`FA00`, `FA08` = satellite Z1, `D57E` = Connect, `FFFF` = libre) ; `793A – 793B` identifiant `AE80 66D3` ; `793E – 7956` paramètres par circuit [hypothèse : bornes de température de départ] |
-| `79E0 – 7A4F` | `79E0` et `79FC` : instantanés ; `79F2` (7.1) ; `7A16` compteur (+1/s) ; `7A18` consommations ; reste `FFFF` |
+| `7919 – 7965` | `791A – 791B` NetworkID ; `791C…` **table des associations** (`FA00`, `FA08` = satellite Z1, `D57E` = Connect, `FFFF` = libre) ; **`7931` version du panneau** (BCD, `1901` = V19.01) ; `793A – 793B` `AE80 66D3` (même codage que `7A16` : 2024-09-01) ; `793E – 7956` paramètres par circuit, dont **`7946` = départ mini / maxi de la zone 1** (`143C` = 20 / 60 °C) **[vérifié le 01/11]** |
+| `79E0 – 7A4F` | `79E0` et `79FC` : instantanés (`79EC` = `0320`, 80,0 constant : une consigne, pas l'ECS instantanée) ; `79F2` (7.1) ; **`7A16 – 7A17` horloge** : heure Unix sur 32 bits, **mot faible d'abord**, heure locale codée comme UTC ; `7A18` consommations ; **`7A30 – 7A33` appareils appairés** : deux fois (index, adresse) puis version BCD, ici `0308 2700 FF7E FFFF` = satellite `08` V27.00, Connect `7E` sans version (même après une association avec version, 3.3) ; reste `FFFF` |
 | `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure en direct, état et jour, NetworkID, `0080` |
 | `A029 – A09B` | `A029` page d'état (7.2) ; `A041` copie décalée ; **`A05E` corps de chauffe en direct** ; `A063 – A09A` consommations |
 | `A0F0 – A104` | `A0F8 – A0F9` identifiant `AE80 66D3` ; **`A0FC` mode ECS** |
@@ -458,10 +458,33 @@ association du satellite, ici `FA`) :
 réponse : 08 80 FA <id> 81 17 2A <page A029 : 42 octets>
 ```
 
-Recopier l'ambiante, le mode et le mot suivant de la page `A029` lue juste avant ; seule la consigne change. La chaudière l'applique
-**immédiatement** (réponse en 0,1 s, page `A029` à jour), jusqu'au prochain **échange régulier** du satellite (`:x0`), qui remet
-sa propre consigne ; les échanges intermédiaires (ambiante seule) ne la modifient pas. Pour un changement durable : consigne directe
-**et** bloc de zone au satellite (6.3), en réaffirmant la consigne directe après chaque échange régulier tant que le bloc n'a pas abouti.
+Recopier l'ambiante de la page `A029` lue juste avant. La chaudière l'applique **immédiatement** (réponse en 0,1 s, page `A029` à
+jour), jusqu'au prochain **échange régulier** du satellite (`:x0`), qui remet sa propre consigne ; les échanges intermédiaires
+(ambiante seule) ne la modifient pas. Pour un changement durable : consigne directe **et** bloc de zone au satellite (6.3), en
+réaffirmant la consigne directe après chaque échange régulier tant que le bloc n'a pas abouti.
+
+**Démarrer le chauffage tout de suite [vérifié le 01/11/2026]** : la consigne seule change l'affichage, et une consigne plus basse
+que l'ambiante **arrête** aussitôt la demande, mais elle ne la **lance** pas. Pour la lancer, comme le satellite après un réglage :
+
+1. Écrire le bloc de zone **au nom du satellite**, comme sa réécriture après un réglage local :
+   `80 08 FA <id> 7E 17 A1 54 00 15 A1 54 00 18 30 <bloc:48>` (63 octets). La chaudière le garde, le transfère au Connect
+   (`7E 80 <assoc> <id> 08 17 A1 54 00 15 …`, à accuser comme un relais, 6.4), puis répond `08 80 FA <id> FE 17 30 <bloc>`.
+2. Envoyer la consigne au nom du satellite avec : **mode = octet d'options du bloc** (`01` en Confort ; `05` ne démarre rien) et
+   **dernier mot (`A032`) = `0000`** quand la consigne dépasse l'ambiante (`00C6` sinon).
+3. La chaudière n'en tient compte qu'**environ 50 s après** l'écriture du bloc : renvoyer la consigne vers 35 s et 70 s.
+
+La demande (état `28`) suit en quelques secondes ; la consigne de départ (`A033`) passe de ≈ 20 °C à 53 – 60 °C ; la flamme
+1 à 2 min plus tard. `A032` est en fait l'écho, par le satellite, de la consigne de départ lue à l'échange précédent (`021F`
+= 54,3 après une chauffe, `00C6` = 19,8 au repos). Le vrai satellite garde son propre bloc jusqu'à ce qu'il accepte l'écriture
+normale (6.3) ; avant, sa consigne de `:x0` peut couper la demande, qu'il faut alors réaffirmer.
+
+**Ne jamais remplacer un satellite muet** : sans trame du satellite pendant ≈ 20 min, la chaudière se met en défaut et coupe le
+chauffage (hors-gel compris) ; des trames en son nom masqueraient cette sécurité. N'émettre en son nom que si sa propre trame (ou la
+réponse de la chaudière à celle-ci, `08 80 <assoc> <id> 81 17 2A …`) a été reçue récemment (25 min ici).
+
+**Alertes du satellite [d'après captures externes]** : type **`43`**, texte en ASCII terminé par `00` :
+`80 08 00 B4 01 43 00 1C "SATELLITE Z1\0CHANGER PILES \0"`, accusé `08 80 00 B4 81 43` ; « aucune alerte » = `43 00 00`
+(au démarrage du satellite, et chaque jour à 04:00 par la sonde extérieure).
 
 ---
 
@@ -472,7 +495,7 @@ sa propre consigne ; les échanges intermédiaires (ambiante seule) ne la modifi
 | `:x9:30` – `:x2:30` | satellites | **fenêtre réservée** : le Connect n'émet que ses accusés |
 | `:x0:08` | chaudière → satellite Z1 | réponse d'état (page `A029`) |
 | `:x3`, `:x8` | chaudière | rafraîchissement de l'instantané `79F2` |
-| `:x4:37` | satellite Z1 | écoute des écritures de zone (créneau observé ici, propre à l'installation) |
+| `:x4:37`, `:x9:14` | satellite Z1 | écoute des écritures de zone (créneaux observés ici, propres à l'installation) ; aussi juste après un appui sur sa touche « i » |
 | `:03` à `:09`, chaque minute | Connect (ce dépôt) | lecture `A029` (horloge, état) |
 | toutes les 15 s hors fenêtre | Connect (ce dépôt) | lecture `A05E` (brûleur) |
 | `:x3`, `:x8` | Connect | lecture `79F2` (et `79E6` à `:x3`, fumées de l'instantané de `:x2`) |
@@ -512,8 +535,8 @@ observations faites sur d'autres installations, non vérifiées ici (**[bridge]*
   panneau → `7E 80 D5 <id> 05 10 A0 F0 00 0D 1A <26 octets>` (zéros, `AE80 66D3` en `A0F8`, **mode ECS en `A0FC`**, dernier mot :
   `0080` Max, `0090` Eco Horaires). Sans accusé, répété 4 fois à 1 s (nouvel id) puis abandonné ; avec l'accusé
   `80 7E D5 <id> 85 10 A0 F0 00 0D` (même id, envoyé en 10 ms), une seule émission. `45` jamais observé.
-- Autres types : `43` (SONDE_INIT, avant les envois de la sonde, données `00 00`), `44` (émis par le Connect, données `0100`/`0200`,
-  sens inconnu). Chaudière à l'adresse **`84`** sur certaines installations (alors adresses mémoire `+ 0xC8`).
+- Autres types : `43` (le bridge l'appelle SONDE_INIT : c'est en fait une **alerte texte**, voir 9 ; `43 00 00` = aucune
+  alerte), `44` (émis par le Connect, données `0100`/`0200`, sens inconnu). Chaudière à l'adresse **`84`** sur certaines installations (alors adresses mémoire `+ 0xC8`).
 - `79E0` (bloc « capteurs » complet) : en plus de ce qui figure en 7.1, **puissance ECS / chauffage** (mots 7 et 8), **ECS
   instantanée** (mot 12, `79EC`), ambiantes, consignes de départ et consignes des zones, extérieure. Rafraîchi au rythme propre de la
   chaudière (≈ 5 min, plus souvent brûleur allumé). `7A34` = consommation totale chez eux (illisible, `FFFF`, ici).
@@ -536,7 +559,8 @@ observations faites sur d'autres installations, non vérifiées ici (**[bridge]*
 
 - Poussée `45` (BOILER_EVENT) : jamais observée ici ; poussées `10` d'autres adresses que `A0F0`.
 - Trames de la sonde extérieure et des satellites Z2/Z3 (formats [MQTT] seulement).
-- Zones 2 et 3, boost, chaudières d'une autre famille (`+ 0xC8`).
+- Zones 2 et 3, chaudières d'une autre famille (`+ 0xC8`).
+- Version du Connect dans la chaudière : `7A30` ne change pas après une association avec version (3.3).
 - Octet 5 du bloc de zone, octets inconnus de la page `A029`, paramètres `793E – 7956`, identifiant `AE80 66D3`.
 - Détection du brûleur en chauffage plus rapide qu'un instantané de fumées toutes les 5 minutes.
 - Codes d'anomalie de la chaudière (seul le bit « anomalie » est connu).

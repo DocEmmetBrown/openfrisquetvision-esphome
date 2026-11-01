@@ -1699,7 +1699,14 @@ static void test_pairing() {
   // NetworkID recovery: broadcast while listening, the learned network afterwards, nothing transmitted.
   {
     PairingSession s;
-    CHECK(!s.start(PairingKind::kRecoverNetwork, kIdConnect, kBroadcastNetwork, 0));
+    CHECK(!s.start(PairingKind::kRecoverNetwork, kIdConnect, nullptr, 0));
+    {
+      // A radio not paired yet (broadcast network) may start a session; a failure brings it back there.
+      PairingSession unpaired;
+      CHECK(unpaired.start(PairingKind::kAssociate, kIdConnect, kBroadcastNetwork, 0));
+      unpaired.cancel();
+      CHECK(memcmp(unpaired.network(), kBroadcastNetwork, 4) == 0);
+    }
     CHECK(s.start(PairingKind::kRecoverNetwork, kIdConnect, home, 1000));
     CHECK(!s.start(PairingKind::kRecoverNetwork, kIdConnect, home, 1000));  // one session at a time
     CHECK(memcmp(s.network(), kBroadcastNetwork, 4) == 0);
@@ -1995,6 +2002,23 @@ static void test_burner() {
     CHECK(decode_boiler_event(event.data(), event.size(), ev) && ev.device == 0x80 && ev.code == 0x31 &&
           ev.time == 0x6AE5C871);
     CHECK(decode_boiler_state(0x81).anomaly && decode_boiler_state(0x29).fault && !decode_boiler_state(0x28).anomaly);
+  }
+  // The zone 1 satellite's association byte, learned from the boiler's answer to its exchange.
+  {
+    TxPolicy lp = engine_policy(TxLevel::kWrite, false);
+    lp.satellite_override = true;
+    ConnectEngine l;
+    l.set_policy(lp);
+    ReadResult result;
+    Bytes page = F["payload_sat_broadcast_reduced"];  // 08 80 FA ...
+    CHECK(l.policy().satellite_association == 0xFF);
+    l.on_frame(100, page.data(), page.size(), result);
+    CHECK(l.policy().satellite_association == 0xFA);
+    lp.satellite_override = false;
+    ConnectEngine n;
+    n.set_policy(lp);
+    n.on_frame(100, page.data(), page.size(), result);
+    CHECK(n.policy().satellite_association == 0xFF);  // not learned without satellite_override
   }
   // Satellite silence guard: nothing in the satellite's name unless it was heard within 25 min.
   {

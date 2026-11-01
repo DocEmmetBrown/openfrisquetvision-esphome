@@ -1,0 +1,272 @@
+# Frisquet Visio (Eco Radio) → Home Assistant, sur une Heltec WiFi LoRa 32 V4.3.
+# La carte devient le « Frisquet Connect » de la chaudière. Voir README.md pour l'installation pas à pas.
+#
+# À faire avant le premier flash : copier secrets.yaml.example en secrets.yaml et le remplir.
+# Rien d'autre à configurer : le réseau radio et les identifiants sont appris à l'association.
+
+substitutions:
+  name: frisquet
+  friendly_name: Frisquet
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  project:
+    name: openfrisquetvisio.esphome
+    version: "1.0.0"
+  platformio_options:
+    board_build.flash_mode: qio
+    board_build.f_flash: 80000000L
+    board_build.f_cpu: 240000000L
+  on_boot:
+    # Écran OLED de la Heltec V4 : allumer son alimentation (Vext, GPIO36 active à l'état bas) avant le bus I2C.
+    priority: 1100
+    then:
+      - lambda: |-
+          pinMode(36, OUTPUT);
+          digitalWrite(36, LOW);
+          delay(50);
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+external_components:
+  # Depuis une copie locale de ce dépôt (frisquet.yaml à la racine). Avec le module ESPHome de Home Assistant, utiliser
+  # plutôt la source GitHub du dépôt, par exemple :
+  #   - source: github://<compte>/openfrisquetvision-esphome
+  #     components: [frisquet]
+  - source:
+      type: local
+      path: components
+    components: [frisquet]
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${friendly_name} secours"
+
+captive_portal:
+
+api:
+  # La carte est le Connect de la chaudière : elle doit continuer à tourner même sans Home Assistant.
+  reboot_timeout: 0s
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+frisquet:
+  board: heltec_v4_3
+  # Émission complète : lectures, accusés et écritures (consignes, modes, programme, eau chaude).
+  tx: write
+  dry_run: false
+  # Le bouton « Associer le Connect » peut répondre à la chaudière (indispensable à la première mise en service).
+  pairing: true
+  # Réponse d'association d'un vrai Frisquet Connect (version 21.01.02).
+  pairing_version: "01:21:01:02"
+  # Un changement de la zone 1 agit sur la chaudière en moins d'une minute, sans attendre le satellite.
+  satellite_override: true
+  rx_boosted_gain: true
+
+  # Zone 1
+  zone1_ambient_temperature:
+    id: z1_ambient
+    name: Zone 1 température ambiante
+  zone1_setpoint:
+    id: z1_setpoint
+    name: Zone 1 consigne
+  zone1_mode:
+    id: z1_mode
+    name: Zone 1 mode
+  zone_program:
+    name: Zone 1 programme (lisible)
+  zone1_flow_temperature:
+    name: Zone 1 départ
+  zone1_flow_setpoint:
+    name: Zone 1 consigne de départ
+
+  # Chaudière
+  boiler_state:
+    id: boiler_state
+    name: Chaudière état
+  burner:
+    id: burner
+    name: Chaudière brûleur
+  boiler_fault:
+    name: Chaudière anomalie
+  last_alert:
+    id: last_alert
+    name: Chaudière dernière alerte
+  outdoor_temperature:
+    name: Température extérieure
+  hot_water_temperature:
+    id: hot_water
+    name: Chaudière eau chaude
+  heating_body_temperature:
+    name: Chaudière corps de chauffe
+  heating_body_live:
+    name: Chaudière corps de chauffe (direct)
+  flue_temperature:
+    name: Chaudière fumées
+  pressure:
+    name: Chaudière pression
+  hot_water_mode:
+    name: Chaudière mode ECS (lu)
+  boiler_clock:
+    name: Chaudière horloge
+    entity_category: diagnostic
+
+  # Consommations (kWh, comme le Frisquet Connect)
+  consumption_hot_water:
+    name: Consommation eau chaude (jour)
+  consumption_heating:
+    name: Consommation chauffage (jour)
+  annual_consumption_hot_water:
+    name: Consommation eau chaude (année)
+  annual_consumption_heating:
+    name: Consommation chauffage (année)
+
+  # Diagnostic
+  panel_version:
+    name: Chaudière version panneau
+  paired_versions:
+    name: Chaudière appareils appairés
+  zone1_flow_min:
+    name: Zone 1 départ mini
+  zone1_flow_max:
+    name: Zone 1 départ maxi
+  network:
+    name: Radio réseau
+  pairing_state:
+    name: Radio association
+  zone_block_state:
+    name: Zone 1 bloc
+  zone_write:
+    name: Zone 1 écriture
+  hot_water_write:
+    name: Chaudière écriture ECS
+  rssi:
+    name: Radio signal
+    filters:
+      - throttle: 60s
+  seconds_since_frame:
+    name: Radio âge dernière trame
+  reads_failed:
+    name: Radio lectures échouées
+
+climate:
+  - platform: frisquet
+    name: Zone 1
+
+select:
+  - platform: frisquet
+    type: zone1_mode
+    name: Zone 1 mode (commande)
+  - platform: frisquet
+    name: Chaudière mode ECS
+
+number:
+  - platform: frisquet
+    type: zone1_comfort
+    name: Zone 1 consigne confort
+  - platform: frisquet
+    type: zone1_reduced
+    name: Zone 1 consigne réduit
+  - platform: frisquet
+    type: zone1_frost
+    name: Zone 1 consigne hors-gel
+
+text:
+  - platform: frisquet
+    name: Zone 1 programme
+    mode: text
+
+switch:
+  - platform: frisquet
+    type: zone1_boost
+    name: Zone 1 boost
+  - platform: frisquet
+    name: Radio arrêt d'urgence
+    restore_mode: ALWAYS_OFF
+    entity_category: config
+  - platform: gpio
+    id: vext
+    pin: GPIO36
+    inverted: true
+    restore_mode: ALWAYS_ON
+    internal: true
+
+button:
+  - platform: frisquet
+    type: associate
+    name: Radio associer le Connect
+    entity_category: config
+  - platform: frisquet
+    type: recover_network
+    name: Radio récupérer le réseau
+    entity_category: config
+  - platform: frisquet
+    type: forget_network
+    name: Radio oublier le réseau appris
+    entity_category: config
+  - platform: restart
+    name: Redémarrer
+    entity_category: config
+
+sensor:
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: WiFi signal
+    update_interval: 60s
+    entity_category: diagnostic
+
+# Écran OLED intégré (SSD1306 128×64). Sans écran, supprimer i2c:, font: et display: (et le on_boot plus haut).
+i2c:
+  id: oled_bus
+  sda: GPIO17
+  scl: GPIO18
+  frequency: 400kHz
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_big
+    size: 18
+    glyphs: " 0123456789.,:-°C/>"
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 11
+    glyphs: " !\"'()+,-./0123456789:;<>?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°éèêàçôûÉ"
+
+display:
+  - platform: ssd1306_i2c
+    i2c_id: oled_bus
+    model: "SSD1306 128x64"
+    address: 0x3C
+    reset_pin: GPIO21
+    contrast: 50%
+    update_interval: 5s
+    lambda: |-
+      if (id(z1_ambient).has_state() && id(z1_setpoint).has_state())
+        it.printf(0, 0, id(font_big), "%.1f° > %.1f°", id(z1_ambient).state, id(z1_setpoint).state);
+      else
+        it.print(0, 0, id(font_big), "--.-° > --.-°");
+      it.printf(0, 22, id(font_small), "Zone 1 : %s", id(z1_mode).has_state() ? id(z1_mode).state.c_str() : "?");
+      std::string state = id(boiler_state).has_state() ? id(boiler_state).state : "?";
+      if (id(burner).has_state() && id(burner).state) state += " (flamme)";
+      if (id(hot_water).has_state())
+        it.printf(0, 36, id(font_small), "%s  ECS %.0f°", state.c_str(), id(hot_water).state);
+      else
+        it.printf(0, 36, id(font_small), "%s", state.c_str());
+      it.printf(0, 50, id(font_small), "%s", id(last_alert).has_state() ? id(last_alert).state.c_str() : "");

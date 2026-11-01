@@ -18,7 +18,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["esp32"]
-AUTO_LOAD = ["binary_sensor"]
+AUTO_LOAD = ["binary_sensor", "sensor", "text_sensor"]
 CODEOWNERS = []
 
 frisquet_ns = cg.esphome_ns.namespace("frisquet_radio")
@@ -193,15 +193,9 @@ def network_id(value):
 
 def _validate_tx(config):
     if config[CONF_TX] != "none":
-        if CONF_ASSOCIATION not in config:
-            raise cv.Invalid(
-                "association (the Connect's association byte, e.g. 0xE3) is required when tx is not 'none'"
-            )
-        if config[CONF_ASSOCIATION] == 0xFF:
-            raise cv.Invalid("association 0xFF means 'not associated'")
-        if config[CONF_SATELLITE_OVERRIDE] and CONF_SATELLITE_ASSOCIATION not in config:
-            raise cv.Invalid("satellite_override needs satellite_association (the satellite's association byte, e.g. 0xFA)")
-    elif config[CONF_PAIRING] or config[CONF_EXPLORE]:
+        if config.get(CONF_ASSOCIATION) == 0xFF:
+            raise cv.Invalid("association 0xFF means 'not associated': leave it out to learn it by pairing")
+    elif config[CONF_PAIRING] or config[CONF_EXPLORE] or config[CONF_SATELLITE_OVERRIDE]:
         raise cv.Invalid("pairing and explore need a transmit path (tx: read, ack or write)")
     return config
 
@@ -211,12 +205,14 @@ CONFIG_SCHEMA = cv.All(
     {
         cv.GenerateID(): cv.declare_id(FrisquetRadio),
         cv.Required(CONF_BOARD): cv.one_of(*BOARDS, lower=True),
-        cv.Required(CONF_NETWORK_ID): network_id,
+        # The installation's network. Optional: learned (with the association byte) by pairing, and kept in flash.
+        cv.Optional(CONF_NETWORK_ID): network_id,
         # none: no transmit path is compiled. read: scheduled reads only. ack: reads and the
         # acknowledgement of the boiler's zone relays (what a Connect must do).
         cv.Optional(CONF_TX, default="none"): cv.one_of("none", "read", "ack", "write", lower=True),
         # While true, frames are built, checked and logged but never transmitted.
         cv.Optional(CONF_DRY_RUN, default=True): cv.boolean,
+        # The Connect's association byte. Optional: learned by pairing.
         cv.Optional(CONF_ASSOCIATION): cv.hex_uint8_t,
         cv.Optional(CONF_RX_BANDWIDTH, default=234.3): cv.one_of(*RX_BANDWIDTHS, float=True),
         # SX1262 boosted receive gain (about +3 dB, a little more current): for the satellites' weak frames.
@@ -229,8 +225,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_PAIRING, default=False): cv.boolean,
         # Allows exploratory reads of any address (text entity of type `explore`), to map the boiler's memory.
         cv.Optional(CONF_EXPLORE, default=False): cv.boolean,
-        # Allows consigne exchanges in the name of the zone 1 satellite (its association byte is required), for direct
-        # setpoints. Experimental.
+        # Zone 1 changes act on the boiler at once (block and consigne in the zone 1 satellite's name), the satellite
+        # following at its next slot. Its association byte is learned from the boiler's answers unless given.
         cv.Optional(CONF_SATELLITE_OVERRIDE, default=False): cv.boolean,
         cv.Optional(CONF_SATELLITE_ASSOCIATION): cv.hex_uint8_t,
         # Burner on: the live heating-body temperature rises (0xA05E every 15 s; ~30-40 s of thermal lag).
@@ -264,8 +260,9 @@ async def to_code(config):
         )
     )
     cg.add(var.set_fem_heltec_v4_3(board["fem"]))
-    octets = config[CONF_NETWORK_ID]
-    cg.add(var.set_network_id(octets[0], octets[1], octets[2], octets[3]))
+    if CONF_NETWORK_ID in config:
+        octets = config[CONF_NETWORK_ID]
+        cg.add(var.set_network_id(octets[0], octets[1], octets[2], octets[3]))
     cg.add(var.set_rx_bandwidth(config[CONF_RX_BANDWIDTH]))
     cg.add(var.set_rx_boosted_gain(config[CONF_RX_BOOSTED_GAIN]))
     if CONF_PAIRING_VERSION in config:
@@ -276,11 +273,11 @@ async def to_code(config):
         # The transmit path only exists in builds that ask for it.
         cg.add_define("FRISQUET_TX_ENABLED")
         level = {"read": 1, "ack": 2, "write": 3}[config[CONF_TX]]
-        cg.add(var.set_tx(level, config[CONF_DRY_RUN], config[CONF_ASSOCIATION]))
+        cg.add(var.set_tx(level, config[CONF_DRY_RUN], config.get(CONF_ASSOCIATION, 0xFF)))
         cg.add(var.set_pairing_allowed(config[CONF_PAIRING]))
         cg.add(var.set_explore_allowed(config[CONF_EXPLORE]))
         if config[CONF_SATELLITE_OVERRIDE]:
-            cg.add(var.set_satellite_override(config[CONF_SATELLITE_ASSOCIATION]))
+            cg.add(var.set_satellite_override(config.get(CONF_SATELLITE_ASSOCIATION, 0xFF)))
         cg.add(var.set_live_body_reads(CONF_BURNER in config or "heating_body_live" in config))
 
     for index, key in enumerate(SENSORS):

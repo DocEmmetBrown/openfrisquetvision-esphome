@@ -262,6 +262,9 @@ class ConnectEngine {
         if (broadcast && !last_page_own_) {
           satellite_seen_ = true;
           satellite_ms_ = now_ms;
+          // The zone 1 satellite's association byte, when not configured: the boiler answers it under that byte.
+          if (policy_.satellite_override && policy_.satellite_association == 0xFF && h.association != 0xFF)
+            policy_.satellite_association = h.association;
         }
         // The satellite's own exchange (not the answer to ours) may have put its old consigne back.
         if (broadcast && direct_active_ && !last_page_own_) {

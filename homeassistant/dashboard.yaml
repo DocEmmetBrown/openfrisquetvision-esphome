@@ -1,0 +1,105 @@
+# Tableau de bord Home Assistant pour la chaudière Frisquet (frisquet.yaml).
+# Paramètres > Tableaux de bord > ajouter un tableau de bord > « Modifier » > ⋮ > « Éditeur de configuration brute »,
+# puis coller ce contenu. Les identifiants supposent le nom d'appareil « frisquet » (substitution `name` du YAML) ;
+# si vous l'avez changé, remplacez « frisquet_ » partout.
+title: Chauffage
+views:
+  - title: Chauffage
+    path: chauffage
+    icon: mdi:radiator
+    cards:
+      - type: thermostat
+        entity: climate.frisquet_zone_1
+        features:
+          - type: climate-hvac-modes
+            hvac_modes: [auto, heat, "off"]
+          - type: climate-preset-modes
+            style: icons
+            preset_modes: [comfort, eco, boost]
+
+      - type: entities
+        title: Zone 1
+        entities:
+          - entity: sensor.frisquet_zone_1_temperature_ambiante
+            name: Ambiante
+          - entity: sensor.frisquet_zone_1_consigne
+            name: Consigne active
+          - entity: select.frisquet_zone_1_mode_commande
+            name: Mode
+          - entity: switch.frisquet_zone_1_boost
+            name: Boost (+1 °C, 6 h max)
+          - entity: number.frisquet_zone_1_consigne_confort
+            name: Consigne confort
+          - entity: number.frisquet_zone_1_consigne_reduit
+            name: Consigne réduit
+          - entity: number.frisquet_zone_1_consigne_hors_gel
+            name: Consigne hors-gel
+          - entity: sensor.frisquet_zone_1_programme_lisible
+            name: Programme
+
+      - type: entities
+        title: Chaudière
+        entities:
+          - entity: sensor.frisquet_chaudiere_etat
+            name: État
+          - entity: binary_sensor.frisquet_chaudiere_bruleur
+            name: Brûleur
+          - entity: select.frisquet_chaudiere_mode_ecs
+            name: Eau chaude
+          - entity: sensor.frisquet_chaudiere_eau_chaude
+            name: Température eau chaude
+          - entity: sensor.frisquet_temperature_exterieure
+            name: Extérieur
+          - entity: sensor.frisquet_zone_1_depart
+            name: Départ
+          - entity: sensor.frisquet_chaudiere_pression
+            name: Pression
+          - entity: binary_sensor.frisquet_chaudiere_anomalie
+            name: Anomalie
+          - entity: sensor.frisquet_chaudiere_derniere_alerte
+            name: Dernière alerte
+
+      - type: history-graph
+        title: Températures (24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.frisquet_zone_1_temperature_ambiante
+            name: Ambiante
+          - entity: sensor.frisquet_zone_1_consigne
+            name: Consigne
+          - entity: sensor.frisquet_temperature_exterieure
+            name: Extérieur
+          - entity: binary_sensor.frisquet_chaudiere_bruleur
+            name: Brûleur
+
+      - type: statistics-graph
+        title: Consommation (kWh par jour)
+        chart_type: bar
+        period: day
+        stat_types: [change]
+        entities:
+          - entity: sensor.frisquet_consommation_chauffage_annee
+            name: Chauffage
+          - entity: sensor.frisquet_consommation_eau_chaude_annee
+            name: Eau chaude
+
+      - type: entities
+        title: Radio et association
+        state_color: true
+        entities:
+          - entity: sensor.frisquet_radio_reseau
+            name: Réseau
+          - entity: sensor.frisquet_radio_association
+            name: Dernière association
+          - entity: sensor.frisquet_zone_1_bloc
+            name: Bloc de zone (doit être « confirmé »)
+          - entity: sensor.frisquet_zone_1_ecriture
+            name: Dernière écriture de zone
+          - entity: button.frisquet_radio_associer_le_connect
+            name: Associer le Connect
+          - entity: sensor.frisquet_radio_signal
+            name: Signal
+          - entity: sensor.frisquet_radio_age_derniere_trame
+            name: Dernière trame
+          - entity: switch.frisquet_radio_arret_d_urgence
+            name: Arrêt d'urgence (n'émet plus rien)

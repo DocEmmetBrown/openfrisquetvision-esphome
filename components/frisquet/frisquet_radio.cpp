@@ -251,6 +251,11 @@ void FrisquetRadio::sync_zone_() {
     }
 #endif
   }
+  const uint8_t satellite_association = this->engine_.policy().satellite_association;
+  if (satellite_association != this->last_satellite_association_) {
+    this->last_satellite_association_ = satellite_association;
+    if (satellite_association != 0xFF) ESP_LOGI(TAG, "Zone 1 satellite association: %02X", satellite_association);
+  }
   const int alive = this->engine_.satellite_alive(millis()) ? 1 : 0;
   if (alive != this->last_satellite_alive_) {
     if (alive) ESP_LOGI(TAG, "Zone 1 satellite heard: changes also go to the boiler directly, in its name");
@@ -483,6 +488,11 @@ void FrisquetRadio::apply_network_() {
 
 void FrisquetRadio::publish_network_() {
   char text[48];
+  if (!::frisquet::is_usable_network(this->active_network_)) {
+    ESP_LOGW(TAG, "Not paired yet: put the boiler in pairing mode for a Connect and press « Radio associer le Connect »");
+    this->publish_text_(kNetwork, "non associé");
+    return;
+  }
   snprintf(text, sizeof(text), "%s (%s), association %02X", format_network(this->active_network_).c_str(),
            this->network_learned_ ? "appris" : "YAML", this->association_);
   this->publish_text_(kNetwork, text);
@@ -645,7 +655,7 @@ void FrisquetRadio::setup() {
   policy.association = this->association_;
   policy.explore_reads = this->explore_allowed_;
   policy.live_body_reads = this->live_body_reads_;
-  policy.satellite_override = this->satellite_association_ != 0xFF;
+  policy.satellite_override = this->satellite_override_;
   policy.satellite_association = this->satellite_association_;
   if (this->tx_level_ >= 3)
     policy.zone_write_mask = ::frisquet::kZoneFieldSetpoints | ::frisquet::kZoneFieldMode | ::frisquet::kZoneFieldProgram;
@@ -715,7 +725,7 @@ void FrisquetRadio::tx_step_(uint32_t now) {
     ESP_LOGI(TAG, "EXPLORE %04X+%02X: %s", this->engine_.explore_address(), this->engine_.explore_words(),
              this->engine_.explore_refused() ? "boiler refused" : "no answer");
   // On the broadcast network (or until the installation's sync word is applied again) nothing of ours goes out.
-  if (!this->on_installation_network_()) {
+  if (!this->on_installation_network_() || this->association_ == 0xFF) {
     this->pending_tx_valid_ = false;
     return;
   }
@@ -955,10 +965,12 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
       break;
     }
     case ::frisquet::ReadKind::kExplore: {
+#ifdef FRISQUET_TX_ENABLED
       // Header (6), length byte, data: only the data is logged.
       const size_t data = length > 7 ? length - 7 : 0;
       ESP_LOGI(TAG, "EXPLORE %04X+%02X: %s", this->engine_.explore_address(), this->engine_.explore_words(),
                format_hex(frame + 7, data).c_str());
+#endif
       break;
     }
     case ::frisquet::ReadKind::kBody: {
@@ -1119,9 +1131,13 @@ void FrisquetRadio::dump_config() {
   ESP_LOGCONFIG(TAG, "Frisquet radio:");
   ESP_LOGCONFIG(TAG, "  Pins: CS=%u IRQ=%u RST=%u BUSY=%u SCK=%u MISO=%u MOSI=%u", this->cs_, this->irq_, this->reset_,
                 this->busy_, this->sck_, this->miso_, this->mosi_);
-  ESP_LOGCONFIG(TAG, "  Network ID: %s (%s)", format_network(this->active_network_).c_str(),
-                this->network_learned_ ? "learned by pairing" : "YAML");
-  if (this->network_learned_) ESP_LOGCONFIG(TAG, "  YAML network ID: %s", format_network(this->network_id_).c_str());
+  if (!::frisquet::is_usable_network(this->active_network_))
+    ESP_LOGCONFIG(TAG, "  Network ID: not paired yet (pairing: « Radio associer le Connect »)");
+  else
+    ESP_LOGCONFIG(TAG, "  Network ID: %s (%s)", format_network(this->active_network_).c_str(),
+                  this->network_learned_ ? "learned by pairing" : "YAML");
+  if (this->network_learned_ && ::frisquet::is_usable_network(this->network_id_))
+    ESP_LOGCONFIG(TAG, "  YAML network ID: %s", format_network(this->network_id_).c_str());
   ESP_LOGCONFIG(TAG, "  Association confirmations: %s", this->pairing_allowed_ ? "allowed" : "refused");
   ESP_LOGCONFIG(TAG, "  RX bandwidth: %.1f kHz", this->rx_bandwidth_);
   if (this->rx_boosted_result_ == 1) ESP_LOGCONFIG(TAG, "  RX boosted gain: off");

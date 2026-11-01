@@ -87,10 +87,11 @@ inline const char *pairing_state_name(PairingState s) {
 
 class PairingSession {
  public:
-  // False (nothing changes) when a session is already running or `current` is not a usable network.
+  // False (nothing changes) when a session is already running. `current` may be unusable (a radio not paired yet):
+  // a failed or cancelled session returns to it.
   bool start(PairingKind kind, uint8_t self_id, const uint8_t *current, uint32_t now_ms,
              uint32_t listen_ms = kPairingListenMs) {
-    if (active() || !is_usable_network(current)) return false;
+    if (active() || current == nullptr) return false;
     kind_ = kind;
     self_id_ = self_id;
     memcpy(committed_, current, 4);
