@@ -684,6 +684,21 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Brûleur : flamme environ 1 – 2 min après la demande ; il a encore brûlé jusqu'à ≈ 14:11 après le retour à `20` (14:07:58).
 - Le vrai satellite garde son propre bloc (Hors gel ici) : il le renvoie à son échange suivant. En production, l'écriture de
   zone normale reste nécessaire pour qu'il suive.
+- **Automatique depuis HA** (`0.7.22` → `0.7.26`, 14:35 – 15:30) : toute demande de zone 1 envoie d'abord le bloc au nom du
+  satellite, puis la consigne directe, puis l'écriture normale vers le satellite. Le renvoi du bloc par la chaudière (vers le
+  Connect) est reconnu comme le nôtre : accusé, sans valider l'écriture vers le vrai satellite.
+  - **Mode de la consigne = octet d'options du bloc** (`01` en Confort) : avec `05`, rien ne démarre (14:40:48), avec `01`
+    oui (14:43:04). `0.7.23`.
+  - **Délai** : une consigne moins de ≈ 50 s après le bloc n'est pas prise en compte (1 s et 16 s : rien ; 53 s et plus :
+    demande). `0.7.25` renvoie la consigne 35 s puis 70 s après le premier envoi.
+  - **Dernier mot `A032`** : `0000` quand la consigne dépasse l'ambiante, `00C6` sinon. Le satellite y renvoie en fait la
+    consigne de départ lue à l'échange précédent (`021F` = 54,3 à 15:00:05 après une chauffe ; `00C6` = 19,8 au repos).
+  - **Essai final** (15:24:41, Confort depuis HA, dernier arrêt 15:13) : bloc 15:24:42, consigne 15:24:43 puis 15:25:18,
+    **demande à 15:25:21** (consigne de départ 53 puis 60 °C). Arrêt par Hors gel : immédiat.
+  - `0.7.26` : une nouvelle demande de zone **remplace** l'écriture en attente de la même zone (Hors gel était refusé tant que
+    l'écriture Confort attendait le satellite).
+- Un échange du vrai satellite avec un bloc Confort accepté (15:10:06) déclenche aussi la demande, sans délai observé.
+- État final vérifié 15:30:05 : Hors gel 8,0, état `20`, consignes 19 / 17 / 8, programme d'origine.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 

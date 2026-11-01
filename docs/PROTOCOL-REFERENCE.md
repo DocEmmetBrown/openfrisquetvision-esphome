@@ -350,7 +350,7 @@ C'est la page commune lue par les satellites (leur « diffusion »), où chaque 
 | 4 – 9 | `A02B – A02D` | date BCD `AA MM JJ hh mm ss` |
 | 10 | `A02E` (fort) | **état chaudière** : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 demande de chauffage (`28`) / veille (`20`) |
 | 11 | `A02E` (faible) | jour de la semaine, 0 = dimanche |
-| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), inconnu (1, toujours `00`), **mode diffusé** (1), mot écrit par le satellite (`00C6` en général), puis la **consigne de départ** calculée par la chaudière (`A033` pour Z1 : ≈ 20 °C sans demande, 54 – 60 °C en demande) |
+| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), inconnu (1, toujours `00`), **mode diffusé** (1), mot écrit par le satellite (`A032` : la consigne de départ lue à l'échange précédent, `00C6` au repos), puis la **consigne de départ** calculée par la chaudière (`A033` pour Z1 : ≈ 20 °C sans demande, 54 – 60 °C en demande) |
 
 Le bit 3 de l'état suit la **demande de chauffage des zones**, pas la flamme : une flamme d'eau chaude le laisse à `20`.
 **Ce qui déclenche la demande n'est pas encore connu** [01/11] :
@@ -360,6 +360,8 @@ Le bit 3 de l'état suit la **demande de chauffage des zones**, pas la flamme : 
 - **[vérifié le 01/11, DESIGN 10.29]** elle démarre en quelques secondes quand la chaudière a un bloc Confort (écrit par le
   satellite, ou en son nom) **et** reçoit la consigne au nom du satellite avec le dernier mot (`A032`) à `0000`. Avec `00C6`
   (valeur habituelle du satellite) rien ne démarre ; le vrai satellite envoie `0000` juste après avoir accepté un bloc ;
+  conditions supplémentaires : l'octet de mode doit être l'octet d'options du bloc (`01` en Confort, pas `05`), et la consigne
+  doit arriver au moins ≈ 50 s après l'écriture du bloc ;
 - elle apparaît à la **première trame du satellite qui suit son acceptation d'un bloc Confort** (31/10 : 4 min après ; 01/11 : moins
   de 40 s après la réécriture `A154` du satellite) ;
 - une consigne Hors gel écrite au nom du satellite **la coupe** en moins de 25 s.

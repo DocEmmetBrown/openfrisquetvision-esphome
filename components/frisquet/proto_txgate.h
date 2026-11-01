@@ -142,8 +142,8 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   }
   if (header.type == kInit && !header.is_ack() && length == kZoneWriteLength && header.source >= kIdZone1 &&
       header.source <= kIdZone3) {
-    // The zone 1 satellite's block write-back, in its name: only its mode and options may differ from the last
-    // known block (zone_reference), so that the boiler starts or stops heating at once (DESIGN 10.29).
+    // The zone 1 satellite's block write-back, in its name, so that the boiler starts or stops heating at once
+    // (DESIGN 10.29): checked as a zone write against the last known block (zone_reference).
     cls = TxClass::kSatelliteBlock;
     if (classified) *classified = cls;
     if (header.destination != kIdBoiler || header.reception != policy.self_id || header.source != kIdZone1 ||
@@ -151,7 +151,7 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
       return TxVerdict::kBlockedIdentity;
     static const uint8_t kBody[9] = {0xA1, 0x54, 0x00, 0x15, 0xA1, 0x54, 0x00, 0x18, 0x30};
     if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0) return TxVerdict::kBlockedAddress;
-    if (!zone_block_allowed(kZoneFieldMode, frame + 15, zone_reference)) return TxVerdict::kBlockedAddress;
+    if (!zone_block_allowed(policy.zone_write_mask, frame + 15, zone_reference)) return TxVerdict::kBlockedAddress;
     if (!policy.satellite_override || policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
     return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
   }

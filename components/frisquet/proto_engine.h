@@ -140,7 +140,17 @@ class ConnectEngine {
   // Ask for a new block for a zone. Refused while a zone write is pending and until the zone's current block
   // is known: every byte not meant to change is copied from it. The gate decides what may really change.
   bool request_zone_block(uint8_t zone_index, const uint8_t *block, uint8_t fields) {
-    if (zone_index >= 3 || !zone_confirmed_[zone_index] || zone_write_pending() || !block) return false;
+    if (zone_index >= 3 || !zone_confirmed_[zone_index] || !block) return false;
+    if (zone_write_pending()) {
+      // The latest request wins: a pending write of the same zone is replaced (01/11/2026: Hors gel refused while
+      // the Confort write waited for the satellite).
+      if (zone_index != zone_index_) return false;
+      if (zone_writing_) {
+        zone_writing_ = false;
+        next_id_ = transaction_.next_message_id();
+        transaction_.abort();
+      }
+    }
     memcpy(zone_request_, block, kZoneBlockSize);
     zone_fields_ = fields;
     zone_index_ = zone_index;
@@ -149,6 +159,7 @@ class ConnectEngine {
     if (zone_index == 0 && policy_.satellite_override && policy_.satellite_association != 0xFF) {
       direct_active_ = true;
       direct_wanted_ = true;
+      sat_block_wanted_ = true;  // the boiler acts on the block at once only if the satellite "has" it (DESIGN 10.29)
     }
     return true;
   }
@@ -234,7 +245,13 @@ class ConnectEngine {
         }
       }
     }
-    if (is_zone_relay(payload, length, policy_.self_id) && length <= sizeof(relay_)) {
+    if (is_zone_relay(payload, length, policy_.self_id) && length <= sizeof(relay_) && own_satellite_block_(now_ms, payload)) {
+      // The boiler forwarding our own block in the satellite's name: acknowledge it, but the real satellite does not
+      // have it yet, so neither the known block nor a pending zone write change.
+      memcpy(relay_, payload, length);
+      relay_length_ = length;
+      ack_pending_ = true;
+    } else if (is_zone_relay(payload, length, policy_.self_id) && length <= sizeof(relay_)) {
       memcpy(relay_, payload, length);
       relay_length_ = length;
       ack_pending_ = true;
@@ -359,6 +376,24 @@ class ConnectEngine {
       if (direct_consigne_(now_ms, zone_request_, data)) request_satellite_consigne(data, direct_urgent_);
       direct_urgent_ = false;
     }
+    // A consigne less than ~50 s after the block in the satellite's name is not acted on (01/11/2026: nothing after
+    // 1 s and 16 s, heating after 53 s and more, DESIGN 10.29): send it again later, even if the page shows it.
+    if (direct_repeat_ms_ != 0 && static_cast<int32_t>(now_ms - direct_repeat_ms_) >= 0 && !consigne_pending_) {
+      direct_repeat_ms_ = direct_repeats_left_ > 1 ? now_ms + kDirectRepeatMs : 0;
+      if (direct_repeats_left_ > 0) --direct_repeats_left_;
+      uint8_t data[8];
+      if (direct_active_ && direct_consigne_(now_ms, zone_request_, data, true)) request_satellite_consigne(data);
+    }
+    // Queued after the consigne but at the front: the block in the satellite's name goes first.
+    if (sat_block_wanted_ && !sat_block_pending_) {
+      sat_block_wanted_ = false;
+      if (direct_active_) {
+        memcpy(sat_block_, zone_request_, kZoneBlockSize);
+        sat_block_fields_ = zone_fields_;
+        sat_block_pending_ = true;
+        enqueue_front_(ReadKind::kSatelliteBlock);
+      }
+    }
     if (!transaction_.active()) {
       schedule_(now_ms);
       if (!start_next_(now_ms)) return false;
@@ -397,6 +432,7 @@ class ConnectEngine {
     // A zone write may only change the fields it was requested for, whatever the policy would allow.
     TxPolicy gate = policy_;
     if (zone_writing_) gate.zone_write_mask &= zone_fields_;
+    if (current_kind_ == ReadKind::kSatelliteBlock) gate.zone_write_mask &= sat_block_fields_;
     const uint8_t *reference = nullptr;
     if (zone_writing_ && zone_confirmed_[zone_index_]) reference = zone_block_[zone_index_];
     else if (current_kind_ == ReadKind::kSatelliteBlock && zone_confirmed_[0]) reference = zone_block_[0];
@@ -472,6 +508,7 @@ class ConnectEngine {
     sat_block_[3] = mode;
     sat_block_[4] = static_cast<uint8_t>((sat_block_[4] & ~0x17) | owned);
     if (!zone_block_allowed(kZoneFieldMode, sat_block_, zone_block_[0])) return false;
+    sat_block_fields_ = kZoneFieldMode;
     sat_block_pending_ = true;
     enqueue_front_(ReadKind::kSatelliteBlock);
     return true;
@@ -480,7 +517,11 @@ class ConnectEngine {
   // The consigne the satellite should send for `block` now (zone 1), from the last state page: ambient, mode byte and
   // following word copied, active setpoint resolved (in Auto from the programme at the boiler's time). False when it
   // cannot be computed, or when the page already shows it.
-  bool direct_consigne_(uint32_t now_ms, const uint8_t *block, uint8_t *data) const {
+  bool own_satellite_block_(uint32_t now_ms, const uint8_t *payload) const {
+    return sat_block_sent_ && payload[4] == kIdZone1 && static_cast<uint8_t>(payload[3] - sat_block_id_) <= 2 &&
+           now_ms - sat_block_ms_ < 30000 && memcmp(payload + 15, sat_block_, kZoneBlockSize) == 0;
+  }
+  bool direct_consigne_(uint32_t now_ms, const uint8_t *block, uint8_t *data, bool force = false) const {
     if (!page_known_ || !clock_.known() || now_ms - page_ms_ > 15UL * 60UL * 1000UL) return false;
     const uint16_t comfort = static_cast<uint16_t>(block[0] + 50);
     const uint16_t reduced = static_cast<uint16_t>(block[1] + 50);
@@ -488,10 +529,12 @@ class ConnectEngine {
     const uint8_t options = block[4];
     uint16_t setpoint = 0;
     uint8_t mode = 0;
+    // Permanent modes: the satellite sends the block's options byte as is; the boiler does not start heating when it
+    // differs (05 instead of 01 on 01/11/2026 14:40, DESIGN 10.29).
     switch (block[3]) {
-      case 0x06: setpoint = comfort; mode = 0x05; break;
-      case 0x07: setpoint = reduced; mode = 0x00; break;
-      case 0x08: setpoint = frost; mode = 0x10; break;
+      case 0x06: setpoint = comfort; mode = options; break;
+      case 0x07: setpoint = reduced; mode = options; break;
+      case 0x08: setpoint = frost; mode = options; break;
       case 0x05: {
         bool in_comfort;
         if (options & 0x02) {
@@ -511,15 +554,18 @@ class ConnectEngine {
       default: return false;
     }
     const uint8_t *zone = page_ + 12;
-    if (be16(zone + 2) == setpoint && (zone[5] & ~0x04) == (mode & ~0x04)) return false;
+    if (!force && be16(zone + 2) == setpoint && (zone[5] & ~0x04) == (mode & ~0x04)) return false;
     data[0] = zone[0];
     data[1] = zone[1];
     data[2] = static_cast<uint8_t>(setpoint >> 8);
     data[3] = static_cast<uint8_t>(setpoint & 0xFF);
     data[4] = 0x00;
     data[5] = mode;
-    data[6] = zone[6];
-    data[7] = zone[7];
+    // Last word (A032): 0000 lets the boiler start heating at once, as the satellite sends right after accepting a
+    // block; 00C6 is its usual value, with which nothing starts (DESIGN 10.29).
+    const bool heat = setpoint > be16(zone);
+    data[6] = 0x00;
+    data[7] = heat ? 0x00 : 0xC6;
     return true;
   }
   bool consigne_pending() const { return consigne_pending_; }
@@ -615,6 +661,12 @@ class ConnectEngine {
       consigne_id_ = next_id_;
       consigne_sent_ = true;
       consigne_ms_ = now_ms;
+      if (direct_active_ && sat_block_sent_ && now_ms - sat_block_ms_ < 10000 && direct_repeat_ms_ == 0 &&
+          !direct_repeated_) {
+        direct_repeat_ms_ = now_ms + kDirectRepeatMs;
+        direct_repeats_left_ = kDirectRepeats;
+        direct_repeated_ = true;
+      }
       transaction_.start_satellite_consigne(kIdZone1, policy_.satellite_association, next_id_, consigne_data_);
       ++stats_.consignes_sent;
       return true;
@@ -624,6 +676,10 @@ class ConnectEngine {
       --queue_length_;
       current_kind_ = ReadKind::kSatelliteBlock;
       sat_block_pending_ = false;
+      direct_repeated_ = false;
+      sat_block_id_ = next_id_;
+      sat_block_ms_ = now_ms;
+      sat_block_sent_ = true;
       transaction_.start_satellite_block(kIdZone1, policy_.satellite_association, next_id_, policy_.self_id,
                                          sat_block_);
       return true;
@@ -715,7 +771,17 @@ class ConnectEngine {
   bool body_started_ = false;
   uint8_t consigne_data_[8] = {};
   uint8_t sat_block_[kZoneBlockSize] = {};
+  uint8_t sat_block_fields_ = 0;
+  uint8_t sat_block_id_ = 0;
+  uint32_t sat_block_ms_ = 0;
   bool sat_block_pending_ = false;
+  bool sat_block_wanted_ = false;
+  static constexpr uint32_t kDirectRepeatMs = 35000;
+  static constexpr uint8_t kDirectRepeats = 2;
+  uint8_t direct_repeats_left_ = 0;
+  uint32_t direct_repeat_ms_ = 0;
+  bool direct_repeated_ = false;
+  bool sat_block_sent_ = false;
   bool consigne_pending_ = false;
   bool consigne_urgent_ = false;
   uint8_t consigne_id_ = 0;

@@ -423,6 +423,25 @@ static frisquet::TxPolicy engine_policy(frisquet::TxLevel level, bool dry_run) {
   return p;
 }
 
+// The boiler's handling of a block written in the satellite's name: forwarded to the Connect (acknowledged), then
+// answered with reception FE. True when the engine acknowledged and completed it.
+static bool answer_satellite_block(frisquet::ConnectEngine &e, const frisquet::TxRequest &sent, uint32_t t) {
+  using namespace frisquet;
+  Bytes forward(63);
+  const Bytes fhead = {0x7E, 0x80, 0xE3, sent.frame[3], 0x08, 0x17, 0xA1, 0x54, 0x00, 0x15, 0xA1, 0x54, 0x00, 0x18, 0x30};
+  memcpy(forward.data(), fhead.data(), 15);
+  memcpy(forward.data() + 15, sent.frame + 15, 48);
+  ReadResult result;
+  e.on_frame(t, forward.data(), forward.size(), result);
+  TxRequest ack;
+  if (!e.poll(t + 10, ack) || ack.kind != TxClass::kZoneAck || ack.verdict != TxVerdict::kSend) return false;
+  Bytes reply(55);
+  const Bytes rhead = {0x08, 0x80, 0xFA, sent.frame[3], 0xFE, 0x17, 0x30};
+  memcpy(reply.data(), rhead.data(), 7);
+  memcpy(reply.data() + 7, sent.frame + 15, 48);
+  return e.on_frame(t + 20, reply.data(), reply.size(), result) && result.kind == ReadKind::kSatelliteBlock;
+}
+
 static void test_engine_acknowledges_zone_relays() {
   using namespace frisquet;
   const Bytes &relay = F["payload_zone_block"];
@@ -909,7 +928,8 @@ static void test_zone_write() {
   CHECK(!e.request_zone_setpoints(3, 0x96, 0x78, 0x1E) && !e.request_zone_setpoints(1, 0x96, 0x78, 0x1E));
   CHECK(e.request_zone_setpoints(0, 0x96, 0x78, 0x1E));
   CHECK(e.zone_write_state() == WriteState::kQueued && e.zone_write_pending());
-  CHECK(!e.request_zone_setpoints(0, 0x8C, 0x78, 0x1E));  // one write at a time
+  CHECK(!e.request_zone_setpoints(1, 0x8C, 0x78, 0x1E));  // one write at a time: another zone waits
+  CHECK(e.request_zone_setpoints(0, 0x96, 0x78, 0x1E));   // the same zone: the latest request replaces it
 
   uint32_t now = 1000;
   int sends = 0;
@@ -1899,6 +1919,27 @@ static void test_burner() {
     CHECK(!e.reading());
   }
 
+  // The latest zone request replaces a pending write of the same zone.
+  {
+    const Bytes &known = F["payload_zone_relay_live"];
+    ConnectEngine r;
+    TxPolicy rp = engine_policy(TxLevel::kWrite, false);
+    rp.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode | kZoneFieldProgram;
+    r.set_policy(rp);
+    r.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x15, 0x24, 0x40);
+    ReadResult result;
+    r.on_frame(100, known.data(), known.size(), result);
+    TxRequest tx;
+    r.poll(110, tx);
+    CHECK(r.request_zone_mode(0, 0x06));
+    CHECK(r.poll(200, tx) && tx.kind == TxClass::kZoneWrite && tx.frame[18] == 0x06);
+    CHECK(r.request_zone_mode(0, 0x08) && r.zone_write_state() == WriteState::kQueued);
+    bool frost = false;
+    for (uint32_t t = 300; t < 3000; t += 100)
+      if (r.poll(t, tx) && tx.kind == TxClass::kZoneWrite) frost = tx.frame[18] == 0x08;
+    CHECK(frost);
+  }
+
   // The satellite's block write-back, in its name (SATZ): only the mode may change, answered with reception FE.
   {
     const Bytes &known = F["payload_zone_relay_live"];  // mode 05, options 21
@@ -1908,6 +1949,7 @@ static void test_burner() {
     CHECK(Bytes(frame, frame + 15) == head);  // as the satellite's own, 01/11/2026 13:29:25
     TxPolicy p = engine_policy(TxLevel::kWrite, false);
     p.satellite_association = 0xFA;
+    p.zone_write_mask = kZoneFieldMode;
     TxClass cls;
     CHECK(evaluate_tx(p, frame, 63, nullptr, 0, &cls, known.data() + 15) == TxVerdict::kBlockedLevel);
     CHECK(cls == TxClass::kSatelliteBlock);
@@ -1946,7 +1988,7 @@ static void test_burner() {
     CHECK(!s.on_frame(300, forward.data(), forward.size(), result));
     TxRequest ack;
     CHECK(s.poll(310, ack) && ack.kind == TxClass::kZoneAck && ack.verdict == TxVerdict::kSend);
-    CHECK(s.zone_block(0)[3] == 0x06);
+    CHECK(s.zone_block(0)[3] == 0x05);  // our own block: the real satellite does not have it
     Bytes reply(55);
     const Bytes rhead = {0x08, 0x80, 0xFA, tx.frame[3], 0xFE, 0x17, 0x30};
     memcpy(reply.data(), rhead.data(), 7);
@@ -1973,28 +2015,48 @@ static void test_burner() {
     // The state page (broadcast of 22:10:12, weekday 0): Auto reduced, setpoint 17.0.
     Bytes page = F["payload_sat_broadcast_reduced"];
     d.on_frame(200, page.data(), page.size(), result);
-    // Hors gel: the boiler gets frost 8.0 at once, then the block goes to the satellite.
+    // Hors gel: the boiler gets the block in the satellite's name and frost 8.0 at once, then the block goes to the
+    // satellite.
     CHECK(d.request_zone_mode(0, 0x08));
+    CHECK(d.poll(250, tx) && tx.kind == TxClass::kSatelliteBlock && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[18] == 0x08 && tx.frame[19] == 0x30);  // options 21 -> 30, as request_zone_mode
+    CHECK(answer_satellite_block(d, tx, 260));
+    CHECK(d.zone_write_state() == WriteState::kQueued && d.zone_block(0)[3] == 0x05);  // the satellite still has Auto
     CHECK(d.poll(300, tx) && tx.kind == TxClass::kSatelliteConsigne && tx.verdict == TxVerdict::kSend);
-    CHECK(be16(tx.frame + 17) == 80 && tx.frame[20] == 0x10);       // setpoint 8.0, mode byte Hors gel
+    CHECK(be16(tx.frame + 17) == 80 && tx.frame[20] == 0x30);  // setpoint 8.0, mode byte = the block's options
+    CHECK(be16(tx.frame + 21) == 0x00C6);  // no heating wanted: the satellite's usual last word
     CHECK(tx.frame[15] == page[7 + 12] && tx.frame[16] == page[7 + 13]);  // ambient copied
     Bytes reply = page;
     reply[3] = tx.frame[3];
     reply[7 + 14] = 0x00;
     reply[7 + 15] = 0x50;  // the page now shows 8.0
-    reply[7 + 17] = 0x10;
+    reply[7 + 17] = 0x30;
     d.on_frame(400, reply.data(), reply.size(), result);
     bool block = false;
-    for (uint32_t t = 500; t < 4000; t += 100)
-      if (d.poll(t, tx) && tx.kind == TxClass::kZoneWrite) block = true;
+    uint32_t repeat_at = 0;
+    uint32_t repeat2_at = 0;
+    for (uint32_t t = 500; t < 75000; t += 100) {
+      if (!d.poll(t, tx)) continue;
+      if (tx.kind == TxClass::kZoneWrite) block = true;
+      if (tx.kind == TxClass::kSatelliteConsigne) {
+        // Sent again 35 and 70 s after the first, although the page already shows it (DESIGN 10.29).
+        if (repeat_at) repeat2_at = t;
+        else repeat_at = t;
+        Bytes again_reply = reply;
+        again_reply[3] = tx.frame[3];
+        d.on_frame(t + 50, again_reply.data(), again_reply.size(), result);
+      }
+    }
     CHECK(block && d.direct_active());
+    CHECK(repeat_at >= 35300 && repeat_at < 60000);  // may wait for a zone write burst in progress
+    CHECK(repeat2_at >= 70300 && repeat2_at < 72000);
     // The satellite's own regular exchange puts its old setpoint back: re-asserted (after the burst in progress).
     Bytes own = page;
     own[3] = 0x77;
-    d.on_frame(5000, own.data(), own.size(), result);
+    d.on_frame(75000, own.data(), own.size(), result);
     bool again = false;
-    uint32_t t = 5000;
-    for (; t < 30000 && !again; t += 100)
+    uint32_t t = 75000;
+    for (; t < 105000 && !again; t += 100)
       if (d.poll(t, tx) && tx.kind == TxClass::kSatelliteConsigne) again = be16(tx.frame + 17) == 80;
     CHECK(again);
     Bytes reply2 = reply;
@@ -2095,11 +2157,15 @@ static void test_burner() {
     page[7 + 15] = 0x50;  // pretend the boiler holds 8.0 so that a change is needed
     a.on_frame(200, page.data(), page.size(), result);
     CHECK(a.request_zone_setpoints(0, 0x96, 0x78, 0x1E));  // still Auto; Sunday 22:14 is reduced in this programme
+    CHECK(a.poll(250, tx) && tx.kind == TxClass::kSatelliteBlock && tx.frame[15] == 0x96);
+    CHECK(answer_satellite_block(a, tx, 260));
     CHECK(a.poll(300, tx) && tx.kind == TxClass::kSatelliteConsigne);
     const uint8_t *prog = known.data() + 15 + 6;
     const bool comfort_now = (prog[0 * 6 + 44 / 8] >> (44 % 8)) & 1;  // Sunday, slot 44 = 22:00-22:30
     CHECK(be16(tx.frame + 17) == (comfort_now ? 0x96 + 50 : 0x78 + 50));
     CHECK(tx.frame[20] == (comfort_now ? 0x21 : 0x20));
+    // Above the ambient (17.8 in this page): last word 0000, so that the boiler starts heating at once.
+    CHECK(be16(tx.frame + 21) == ((comfort_now ? 0x96 + 50 : 0x78 + 50) > 0xB2 ? 0x0000 : 0x00C6));
   }
   float c = 0;
   const Bytes answer = {0x7E, 0x80, 0xD5, 0x10, 0x81, 0x03, 0x02, 0x03, 0x2E};
