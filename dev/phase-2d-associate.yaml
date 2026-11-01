@@ -6,7 +6,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.26-phase-2d-associate"
+    version: "0.7.28-phase-2d-associate"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -184,6 +184,9 @@ switch:
   - platform: frisquet
     name: Radio arrêt d'urgence
     restore_mode: ALWAYS_OFF
+  - platform: frisquet
+    type: zone1_boost
+    name: Zone 1 boost
 
 sensor:
   - platform: uptime

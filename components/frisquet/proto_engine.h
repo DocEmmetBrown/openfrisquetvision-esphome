@@ -38,7 +38,7 @@ enum class WriteState : uint8_t { kIdle, kQueued, kSending, kAcked, kVerified, k
 
 // Same zone settings, ignoring the option bits the satellite rewrites by itself (0x04, 0x20, others not owned).
 inline bool same_zone_settings(const uint8_t *a, const uint8_t *b) {
-  return memcmp(a, b, 4) == 0 && ((a[4] ^ b[4]) & 0x13) == 0 && memcmp(a + 5, b + 5, kZoneBlockSize - 5) == 0;
+  return memcmp(a, b, 4) == 0 && ((a[4] ^ b[4]) & 0x53) == 0 && memcmp(a + 5, b + 5, kZoneBlockSize - 5) == 0;
 }
 
 struct TxRequest {
@@ -190,6 +190,26 @@ class ConnectEngine {
     block[4] = static_cast<uint8_t>((block[4] & ~0x17) | 0x06 | (comfort ? 0x01 : 0x00));
     return request_zone_block(zone_index, block, kZoneFieldMode);
   }
+  // Boost (Frisquet Connect notice, OpenFrisquetVisio issue #7): comfort +1.0 C and options bit 0x40, in Confort or
+  // in an Auto comfort period only. The Connect owns it: stopping takes the 1.0 C back off and clears the bit.
+  bool request_zone_boost(uint8_t zone_index, bool on) {
+    if (zone_index >= 3 || !zone_confirmed_[zone_index]) return false;
+    uint8_t block[kZoneBlockSize];
+    memcpy(block, zone_block_[zone_index], kZoneBlockSize);
+    const bool active = block[4] & 0x40;
+    if (on) {
+      const bool comfort = block[3] == 0x06 || (block[3] == 0x05 && (block[4] & 0x01));
+      if (active || !comfort || block[0] + kBoostRaw > 250) return false;
+      block[0] = static_cast<uint8_t>(block[0] + kBoostRaw);
+      block[4] |= 0x40;
+    } else {
+      if (!active || block[0] < kBoostRaw) return false;
+      block[0] = static_cast<uint8_t>(block[0] - kBoostRaw);
+      block[4] &= static_cast<uint8_t>(~0x40);
+    }
+    return request_zone_block(zone_index, block, kZoneFieldSetpoints | kZoneFieldMode);
+  }
+  static constexpr uint8_t kBoostRaw = 10;  // +1.0 C
   bool request_zone_program(uint8_t zone_index, const uint8_t *program) {
     if (zone_index >= 3 || !zone_confirmed_[zone_index] || !program) return false;
     uint8_t block[kZoneBlockSize];

@@ -65,10 +65,12 @@ inline bool zone_block_allowed(uint8_t mask, const uint8_t *data, const uint8_t 
   if (!(mask & kZoneFieldMode) && memcmp(data + 3, reference + 3, 3) != 0) return false;
   // The unknown byte is never ours to change.
   if (data[5] != reference[5]) return false;
+  // Boost (0x40) only in Confort or Auto.
+  if ((data[4] & 0x40) && data[3] != 0x06 && data[3] != 0x05) return false;
   if (memcmp(data + 3, reference + 3, 2) != 0) {
-    // A mode change: the options byte must agree with the mode, keeping the bits we do not own.
+    // A mode change: the options byte must agree with the mode, keeping the bits we do not own (0x17 and boost 0x40).
     const uint8_t options = data[4];
-    if ((options & ~0x17) != (reference[4] & ~0x17)) return false;
+    if ((options & ~0x57) != (reference[4] & ~0x57)) return false;
     const uint8_t owned = options & 0x17;
     const bool coherent = (data[3] == 0x05 && (owned & 0x14) == 0x04) || (data[3] == 0x06 && owned == 0x01) ||
                           (data[3] == 0x07 && owned == 0x00) || (data[3] == 0x08 && owned == 0x10);

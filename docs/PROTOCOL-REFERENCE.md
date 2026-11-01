@@ -247,7 +247,7 @@ Bits de l'octet d'options :
 | `0x04` | Auto [MQTT] ; **valeur sans signification en lecture** : le satellite le met ou l'enlève à sa guise |
 | `0x10` | hors gel |
 | `0x20` | indicateur posé par le satellite (« compatible Connect ») ; à conserver |
-| `0x40` | boost [MQTT, non testé] |
+| `0x40` | boost : consigne confort + 1,0 °C, posé par le Connect, 6 h au plus **[vérifié le 01/11]** : le satellite l'accepte, affiche 20 °C et garde `41` dans son bloc |
 
 Valeur à écrire pour chaque choix (les autres bits sont conservés depuis le dernier bloc connu) :
 

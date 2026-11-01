@@ -5,6 +5,7 @@
   dev/ofv_api.py select <exact select name> <option>   choose a select option
   dev/ofv_api.py text <exact text name> <value>          set a text entity
   dev/ofv_api.py press <exact button name>     press a button entity
+  dev/ofv_api.py switch <exact switch name> on|off       turn a switch on or off
 """
 import asyncio
 import re
@@ -22,7 +23,7 @@ async def main():
     entities, _ = await client.list_entities_services()
     names = {e.key: e.name for e in entities}
     action = sys.argv[1]
-    if action in ("set", "press", "select", "text"):
+    if action in ("set", "press", "select", "text", "switch"):
         entity = next(e for e in entities if e.name == sys.argv[2])
         if action == "set":
             client.number_command(entity.key, float(sys.argv[3]))
@@ -30,6 +31,8 @@ async def main():
             client.select_command(entity.key, sys.argv[3])
         elif action == "text":
             client.text_command(entity.key, sys.argv[3])
+        elif action == "switch":
+            client.switch_command(entity.key, sys.argv[3].lower() == "on")
         else:
             client.button_command(entity.key)
         await asyncio.sleep(1)

@@ -1919,6 +1919,42 @@ static void test_burner() {
     CHECK(!e.reading());
   }
 
+  // Boost: comfort +1.0 and options 0x40, from Confort only; off takes it back.
+  {
+    const Bytes &known = F["payload_zone_relay_live"];  // Auto (05/21): comfort period
+    ConnectEngine b;
+    TxPolicy bp = engine_policy(TxLevel::kWrite, false);
+    bp.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode;
+    b.set_policy(bp);
+    b.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x15, 0x44, 0x40);
+    ReadResult result;
+    Bytes confort = known;
+    confort[18] = 0x06;
+    confort[19] = 0x01;
+    b.on_frame(100, confort.data(), confort.size(), result);
+    TxRequest tx;
+    b.poll(110, tx);
+    CHECK(!b.request_zone_boost(0, false));
+    CHECK(b.request_zone_boost(0, true));
+    CHECK(b.poll(200, tx) && tx.kind == TxClass::kZoneWrite && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[15] == confort[15] + 10 && tx.frame[18] == 0x06 && tx.frame[19] == 0x41);
+    Bytes frost = known;
+    frost[18] = 0x08;
+    frost[19] = 0x30;
+    ConnectEngine f;
+    f.set_policy(bp);
+    f.on_frame(100, frost.data(), frost.size(), result);
+    f.poll(110, tx);
+    CHECK(!f.request_zone_boost(0, true));  // not in comfort
+    Bytes boosted(confort.begin() + 15, confort.end());
+    boosted[0] = static_cast<uint8_t>(boosted[0] + 10);
+    boosted[4] = 0x41;
+    Bytes bad = boosted;
+    bad[3] = 0x08;
+    bad[4] = 0x50;  // boost bit in Hors gel
+    CHECK(!zone_block_allowed(kZoneFieldSetpoints | kZoneFieldMode, bad.data(), confort.data() + 15));
+    CHECK(zone_block_allowed(kZoneFieldSetpoints | kZoneFieldMode, boosted.data(), confort.data() + 15));
+  }
   // The latest zone request replaces a pending write of the same zone.
   {
     const Bytes &known = F["payload_zone_relay_live"];

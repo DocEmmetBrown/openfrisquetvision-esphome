@@ -143,6 +143,7 @@ bool FrisquetRadio::request_zone_setpoint(uint8_t field, float celsius) {
 void FrisquetRadio::republish_zone_block() {
   for (int &raw : this->last_zone_raw_) raw = -1;
   this->last_zone_mode_ = -1;
+  this->last_boost_ = -1;
   this->last_program_.clear();
 }
 
@@ -169,6 +170,8 @@ bool FrisquetRadio::request_zone_mode(const std::string &name) {
   }
   return false;
 }
+
+bool FrisquetRadio::request_zone_boost(bool on) { return this->engine_.request_zone_boost(0, on); }
 
 bool FrisquetRadio::request_zone_program(const std::string &hex) {
   uint8_t program[::frisquet::kProgramSize];
@@ -228,6 +231,23 @@ void FrisquetRadio::sync_zone_() {
   }
   if (!this->engine_.zone_block_known(0)) return;
   const uint8_t *block = this->engine_.zone_block(0);
+  const int boost = block_confirmed && (block[4] & 0x40) ? 1 : 0;
+  if (boost != this->last_boost_) {
+    if (boost && this->last_boost_ != 1) {
+      // After a reboot the start is unknown: count from now (at most 6 h more).
+      this->boost_since_ms_ = millis();
+      this->boost_stop_sent_ = false;
+    }
+    this->last_boost_ = boost;
+#ifdef USE_SWITCH
+    if (this->boost_switch_ != nullptr) this->boost_switch_->publish_state(boost);
+#endif
+  }
+  if (boost && !this->boost_stop_sent_ && millis() - this->boost_since_ms_ >= kBoostMaxMs &&
+      this->engine_.request_zone_boost(0, false)) {
+    this->boost_stop_sent_ = true;
+    ESP_LOGI(TAG, "Zone 1 boost: 6 h reached, stopping it");
+  }
   for (uint8_t field = 0; field < 3; ++field) {
     if (block[field] == this->last_zone_raw_[field]) continue;
     this->last_zone_raw_[field] = block[field];
@@ -277,6 +297,7 @@ void FrisquetRadio::sync_hot_water_() {
 bool FrisquetRadio::request_zone_setpoint(uint8_t, float) { return false; }
 void FrisquetRadio::republish_zone_block() {}
 bool FrisquetRadio::request_zone_mode(const std::string &) { return false; }
+bool FrisquetRadio::request_zone_boost(bool) { return false; }
 bool FrisquetRadio::request_zone_program(const std::string &) { return false; }
 #endif
 
@@ -288,6 +309,16 @@ static std::string format_network(const uint8_t *n) {
 
 bool FrisquetRadio::request_explore_read(const std::string &request) {
 #ifdef FRISQUET_TX_ENABLED
+  if (request == "BOOST 1" || request == "BOOST 0") {
+    const bool on = request[6] == '1';
+    if (!this->engine_.request_zone_boost(0, on)) {
+      ESP_LOGW(TAG, "BOOST %s refused (block unknown, not in comfort, already %s)", on ? "on" : "off",
+               on ? "on" : "off");
+      return false;
+    }
+    ESP_LOGI(TAG, "BOOST %s queued for zone 1", on ? "on" : "off");
+    return true;
+  }
   if (request.rfind("SATZ ", 0) == 0) {
     // "SATZ <mode>": the zone 1 satellite's block write-back in its name, the known block with that mode (05..08).
     unsigned mode = 0;

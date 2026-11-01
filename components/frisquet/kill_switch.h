@@ -24,6 +24,17 @@ class KillSwitch : public switch_::Switch, public Component {
   FrisquetRadio *parent_{nullptr};
 };
 
+// Zone 1 boost: ON asks for comfort +1.0 C (at most 6 h), OFF takes it back. The state shown is the zone block's.
+class ZoneBoostSwitch : public switch_::Switch, public Component {
+ public:
+  void set_parent(FrisquetRadio *parent) { parent_ = parent; }
+  void dump_config() override;
+
+ protected:
+  void write_state(bool state) override;
+  FrisquetRadio *parent_{nullptr};
+};
+
 }  // namespace frisquet_radio
 }  // namespace esphome
 #endif

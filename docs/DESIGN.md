@@ -700,6 +700,20 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Un échange du vrai satellite avec un bloc Confort accepté (15:10:06) déclenche aussi la demande, sans délai observé.
 - État final vérifié 15:30:05 : Hors gel 8,0, état `20`, consignes 19 / 17 / 8, programme d'origine.
 
+### 10.30 Boost (01/11/2026 16:01 – 16:20)
+
+- `0.7.27` : `request_zone_boost` = consigne confort + 1,0 °C (`+10` brut) et bit d'options `0x40`, seulement en Confort ou
+  en période confort d'Auto ; l'arrêt retire les deux. La porte accepte le bit `0x40` (mode `05` ou `06` seulement).
+- Essai (utilisateur présent) : Confort depuis HA à 16:01:43, chauffe dans la minute ; satellite à jour 16:04:44.
+  `BOOST 1` à 16:04:49 : page chaudière mode `41`, consigne 20,0 au nom du satellite ; le satellite accepte à 16:09:20
+  (créneau `:x9:14`), affiche **20** et renvoie son bloc `06 / 41 / 20,0`. `BOOST 0` à 16:09:40 : vérifié 16:14:34
+  (`06 / 01 / 19,0`). Retour Hors gel vérifié 16:16:58.
+- Quand une commande vient du Connect, le satellite affiche brièvement un petit **nuage** (témoin de commande à distance).
+- `0.7.28` : interrupteur HA « Zone 1 boost » (`switch`, `type: zone1_boost`) ; son état suit le bloc confirmé (bit `0x40`).
+  La carte coupe le boost après 6 h (compté depuis le redémarrage s'il était déjà actif). Refusé hors confort (vérifié).
+- Pendant le boost, « Zone 1 consigne confort » affiche la consigne relevée (20,0) : c'est le bloc réel.
+- État final vérifié : Hors gel 8,0, état `20`, ECS Eco Horaires, consignes 19 / 17 / 8, programme d'origine.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

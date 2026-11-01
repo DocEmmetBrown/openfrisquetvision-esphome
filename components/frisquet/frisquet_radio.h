@@ -19,6 +19,9 @@
 #ifdef USE_TEXT
 #include "esphome/components/text/text.h"
 #endif
+#ifdef USE_SWITCH
+#include "esphome/components/switch/switch.h"
+#endif
 
 #include "proto_crc.h"
 #include "proto_decode.h"
@@ -156,6 +159,11 @@ class FrisquetRadio : public Component {
   // Zone 1 mode ("Auto", "Confort", "Réduit", "Hors Gel") and weekly programme (84 hexadecimal characters).
   bool request_zone_mode(const std::string &name);
   bool request_zone_program(const std::string &hex);
+  // Zone 1 boost (comfort +1.0 C, options 0x40), stopped by us after kBoostMaxMs (the Connect owns it).
+  bool request_zone_boost(bool on);
+#ifdef USE_SWITCH
+  void set_boost_switch(switch_::Switch *s) { boost_switch_ = s; }
+#endif
   void republish_zone_block();
   void republish_zone_setpoints() { this->republish_zone_block(); }
 
@@ -264,6 +272,13 @@ class FrisquetRadio : public Component {
   select::Select *hot_water_select_{nullptr};
   select::Select *zone_mode_select_{nullptr};
 #endif
+#ifdef USE_SWITCH
+  switch_::Switch *boost_switch_{nullptr};
+#endif
+  static constexpr uint32_t kBoostMaxMs = 6UL * 3600UL * 1000UL;  // Frisquet: at most 6 h
+  int last_boost_{-1};
+  uint32_t boost_since_ms_{0};
+  bool boost_stop_sent_{false};
 
   sensor::Sensor *sensors_[kSensorCount]{};
   text_sensor::TextSensor *texts_[kTextCount]{};

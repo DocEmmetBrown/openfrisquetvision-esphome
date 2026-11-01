@@ -24,6 +24,20 @@ void KillSwitch::write_state(bool state) {
 
 void KillSwitch::dump_config() { LOG_SWITCH("", "Frisquet emergency stop", this); }
 
+void ZoneBoostSwitch::write_state(bool state) {
+  if (this->parent_ == nullptr) return;
+  if (!this->parent_->request_zone_boost(state)) {
+    // Nothing queued: keep showing the block's real state.
+    ESP_LOGW(TAG, "Zone 1 boost %s refused (block not confirmed, not in comfort, or already %s)", state ? "on" : "off",
+             state ? "on" : "off");
+    this->parent_->republish_zone_block();
+    return;
+  }
+  ESP_LOGI(TAG, "Zone 1 boost %s queued; the switch follows the zone block once confirmed", state ? "on" : "off");
+}
+
+void ZoneBoostSwitch::dump_config() { LOG_SWITCH("", "Frisquet zone 1 boost", this); }
+
 }  // namespace frisquet_radio
 }  // namespace esphome
 #endif
