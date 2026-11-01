@@ -26,11 +26,11 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-00. **Heating demand comes from the satellite** (DESIGN 10.28, verified 01/11 13:30): the byte after the consigne in its
-   `A02F` write is `0x40` when it wants heat; the boiler only goes to `28` then. Our direct consigne writes `00`, so it can
-   **stop** heating at once but cannot **start** it; it also sends mode `05` for Confort where the satellite sends `01`.
-   To decide: send `0x40` ourselves when ambient < consigne, or rely on the block only. Fix the Confort mode byte either way.
-   The satellite also accepts block writes at `:x9:14`, and right after a press on « i ».
+00. **Direct consigne can stop heating but not start it** (DESIGN 10.28): with the boiler's zone block in Hors gel, a
+   Confort consigne in the satellite's name leaves the boiler in standby (`20`). Demand starts at the first satellite frame
+   after the satellite has accepted a Confort block. (A `0x40` seen at 13:30:05 was a bit error: CRC invalid, right with `00`.)
+   The user wants an immediate start: next experiment = write the zone block in the satellite's name (`A154`, like its own
+   write-back), then the direct consigne. The satellite also accepts block writes at `:x9:14`, and right after a press on « i ».
 0. **Dual path: done** (DESIGN 10.26): zone 1 changes from HA take effect on the boiler within a second (direct consigne in
    the satellite's name), the satellite follows within 1-10 minutes. Logs: `build/logs/frisq-dual2.log`.
 1. **Live burner state: done** (DESIGN 10.23 – 10.24). « Chaudière brûleur » = last flue snapshot > 40 °C while there is a heating

@@ -350,12 +350,19 @@ C'est la page commune lue par les satellites (leur « diffusion »), où chaque 
 | 4 – 9 | `A02B – A02D` | date BCD `AA MM JJ hh mm ss` |
 | 10 | `A02E` (fort) | **état chaudière** : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 demande de chauffage (`28`) / veille (`20`) |
 | 11 | `A02E` (faible) | jour de la semaine, 0 = dimanche |
-| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), **demande** (1 : `0x40` = le satellite demande du chauffage), **mode diffusé** (1), puis 2 mots [hypothèse : départ et consigne de départ] |
+| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), inconnu (1, toujours `00`), **mode diffusé** (1), mot écrit par le satellite (`00C6` en général), puis la **consigne de départ** calculée par la chaudière (`A033` pour Z1 : ≈ 20 °C sans demande, 54 – 60 °C en demande) |
 
 Le bit 3 de l'état suit la **demande de chauffage des zones**, pas la flamme : une flamme d'eau chaude le laisse à `20`.
-**C'est le satellite qui décide de chauffer** [vérifié le 01/11] : la chaudière passe à `28` à l'échange où le satellite écrit
-`0x40` dans l'octet de demande (consigne 19,0, ambiante 16,8), et reste à `20` tant qu'il écrit `00`, même avec une consigne
-au-dessus de l'ambiante. Une consigne écrite avec `00` **coupe aussitôt** une demande en cours (`28` → `20` en moins d'une seconde).
+**Ce qui déclenche la demande n'est pas encore connu** [01/11] :
+
+- une consigne écrite au nom du satellite (Confort 19,0 pour une ambiante de 16,7, mode `05` ou `01`) **ne la lance pas**
+  (plus de 8 min, puis 6 min : état `20`, consigne de départ 19,8 puis 23,2), tant que le bloc de zone de la chaudière dit Hors gel ;
+- elle apparaît à la **première trame du satellite qui suit son acceptation d'un bloc Confort** (31/10 : 4 min après ; 01/11 : moins
+  de 40 s après la réécriture `A154` du satellite) ;
+- une consigne Hors gel écrite au nom du satellite **la coupe** en moins de 25 s.
+
+Hypothèse : la chaudière croise sa copie du bloc de zone (`A154`, illisible depuis le Connect) et la consigne du satellite. Une trame
+reçue avec un CRC invalide le 01/11 à 13:30:05 portait `40` dans l'octet inconnu : c'était une erreur de bit (le CRC est juste avec `00`).
 
 **Mode diffusé** (octet d'options normalisé par le satellite ; bit `0x04` à ignorer) **[vérifié le 29/10]** :
 

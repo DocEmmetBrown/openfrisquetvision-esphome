@@ -646,14 +646,18 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   (version du satellite, Connect sans version) ; `7531–7544` vides ; `7931` = 1901.
 - **Confort depuis HA** (13:20:42) : consigne directe envoyée aussitôt dans la fenêtre réservée, la chaudière affiche Confort 19,0
   mais **reste en veille (`20`)**. Bloc pris par le satellite à **13:29:14** (créneau `:x9:14`, pas seulement `:x4:37`).
-  À 13:30:05 le satellite écrit `00BE 40 01` : **octet `0x40` = demande de chauffage**, la chaudière passe à `28`. Notre
-  consigne directe écrit `00` (aucune demande) et le mode `05` alors que le satellite écrit `01` en Confort.
+  Le satellite réécrit son bloc dans la chaudière à 13:29:25 ; à sa trame de 13:30:05 la chaudière passe à `28` (consigne de
+  départ 19,8 → 54,1). Cette trame portait `40` après la consigne, mais avec un CRC invalide : le CRC est juste avec `00`, c'était
+  une erreur de bit (fausse piste d'un premier compte rendu).
 - **Brûleur** (test 9) : corps de chauffe 83 → 41 °C (pompe) puis remontée dès 13:31:30 ; `Chaudière brûleur` ON à 13:33:11.
 - **Retour Hors gel** (13:33:35) : la consigne directe (`00`) coupe la demande immédiatement (« Arrêt » au panneau). Bloc
   manqué au créneau `:x4:37`, pris à **13:37:07**, 7 s après un appui sur « i » (réveil par le bouton efficace cette fois).
-- **Conséquence** : la consigne directe peut **arrêter** le chauffage tout de suite, mais pas le **démarrer** : il faut la
-  demande `0x40`, que seul le satellite calcule. Options à décider : envoyer `0x40` nous-mêmes quand ambiante < consigne
-  (le satellite corrige au plus 10 min après), ou ne compter que sur le bloc. Corriger le mode Confort direct (`01`, pas `05`).
+- **Consigne directe seule** (13:42:13, `SAT 00A700BE000100C6`, mode `01` comme le satellite, bloc chaudière Hors gel) : état
+  `20` pendant 6 min, consigne de départ 23,2. Le mode n'est donc pas en cause (le 31/10 la demande est venue avec `05`).
+- **Conséquence** : la consigne directe peut **arrêter** le chauffage tout de suite, mais pas le **démarrer**. La demande suit la
+  première trame du satellite après qu'il a accepté le bloc (31/10 11:48:05 – 11:48:55 ; 01/11 13:29:25 – 13:30:05). Piste :
+  la chaudière croise sa copie du bloc (`A154`, lecture refusée) et la consigne. Expérience à faire : écrire le bloc au nom du
+  satellite (comme sa réécriture `80 08 FA <id> 7E 17 A1 54 00 15 …`), puis la consigne directe.
 - État final vérifié 13:37 : Hors gel 8,0, état `20`, ECS Eco Horaires, consignes 19 / 17 / 8, programme d'origine.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
