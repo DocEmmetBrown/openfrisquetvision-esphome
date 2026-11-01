@@ -49,7 +49,7 @@ Aucune autre valeur n'est à fournir : le réseau radio de la chaudière et les 
 **Avec le module ESPHome de Home Assistant** :
 
 1. Dans `/config/esphome/secrets.yaml` (bouton « Secrets » du module), ajoutez les clés de
-   [secrets.yaml.example](secrets.yaml.example) : `wifi_ssid`, `wifi_password`, `api_key`, `ota_password`.
+   [secrets.yaml.example](secrets.yaml.example) : `wifi_ssid`, `wifi_password`, `api_key`.
 2. **Nouvel appareil** › continuer › ignorer l'installation, puis **Modifier** l'appareil créé et remplacez tout son contenu par
    celui de [frisquet.yaml](frisquet.yaml).
 3. **Installer** : par câble USB la première fois (« Brancher sur cet ordinateur »), sans fil ensuite.
@@ -63,13 +63,14 @@ esphome run frisquet.yaml
 
 Les mises à jour suivantes passent par le Wi-Fi.
 
-Pour remplacer un firmware ESPHome déjà installé sur la carte sous un autre nom, ajoutez temporairement
-`use_address: <adresse IP de la carte>` sous `wifi:` pour la première installation sans fil, et gardez le même
-`ota_password` que l'ancien firmware.
+**Remplacer un firmware ESPHome déjà installé** (autre nom, mot de passe OTA) sans câble : pour le premier envoi seulement,
+ajoutez `use_address: <adresse IP de la carte>` sous `wifi:` et remplacez `encryption: {}` de la section `ota:` par
+`password: "<mot de passe OTA de l'ancien firmware>"`. Une fois installé, revenez à `encryption: {}`, retirez `use_address`
+et réinstallez.
 
 ### 3. Ajouter à Home Assistant
 
-Home Assistant découvre la carte (« Frisquet ») : acceptez, et donnez la clé `api_key` de `secrets.yaml`.
+Home Assistant découvre la carte (« Frisquet ») : acceptez, et donnez la clé `api_key` des secrets.
 
 ### 4. Associer la carte à la chaudière (une seule fois)
 
