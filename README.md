@@ -54,8 +54,20 @@ esphome run frisquet.yaml
 
 Choisissez le port USB. Les mises à jour suivantes passent par le Wi-Fi (`esphome run frisquet.yaml` propose la carte).
 
-Avec le **module ESPHome de Home Assistant** : créez un appareil, collez le contenu de `frisquet.yaml`, et remplacez la source
-locale de `external_components` par la source GitHub de ce dépôt (le fichier l'indique).
+Avec le **module ESPHome de Home Assistant** :
+
+1. Copiez le dossier `components/frisquet` de ce dépôt dans `/config/esphome/components/frisquet` sur Home Assistant
+   (module Samba, Studio Code Server ou SSH). Une fois le dépôt publié, la source GitHub indiquée dans `frisquet.yaml`
+   remplace cette copie.
+2. Dans `/config/esphome/secrets.yaml`, ajoutez les clés de `secrets.yaml.example` (`wifi_ssid`, `wifi_password`, `api_key`,
+   `ota_password`).
+3. Dans ESPHome : **Nouvel appareil** › continuer › ignorer l'installation, puis **Modifier** l'appareil créé et remplacer tout
+   son contenu par celui de `frisquet.yaml`.
+4. **Installer** : par câble USB la première fois (« Brancher sur cet ordinateur »), sans fil ensuite.
+
+Pour remplacer un firmware ESPHome déjà installé sur la carte sous un autre nom, ajoutez temporairement
+`use_address: <adresse IP de la carte>` sous `wifi:` pour la première installation sans fil, et gardez le même
+`ota_password` que l'ancien firmware.
 
 ### 3. Ajouter à Home Assistant
 
