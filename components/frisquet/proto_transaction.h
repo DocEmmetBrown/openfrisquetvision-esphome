@@ -62,6 +62,16 @@ class ReadTransaction {
     memcpy(block_, data, 8);
   }
 
+  // The satellite's block write-back in its name: answered (reception connect | 0x80) once the boiler has forwarded
+  // it to the Connect and had it acknowledged.
+  void start_satellite_block(uint8_t zone_id, uint8_t association, uint8_t first_message_id, uint8_t connect_id,
+                             const uint8_t *block) {
+    start(zone_id, association, first_message_id, 0, 0);
+    kind_ = Kind::kSatelliteBlock;
+    connect_id_ = connect_id;
+    memcpy(block_, block, kZoneBlockSize);
+  }
+
   bool active() const { return state_ == State::kRunning; }
   void abort() { state_ = State::kIdle; }
   bool done() const { return state_ == State::kDone; }
@@ -99,6 +109,9 @@ class ReadTransaction {
       case Kind::kSatelliteConsigne:
         length = build_satellite_consigne(frame, capacity, self_id_, association_, message_id_, block_);
         break;
+      case Kind::kSatelliteBlock:
+        length = build_satellite_block(frame, capacity, self_id_, association_, message_id_, connect_id_, block_);
+        break;
       default:
         length = build_zone_write(frame, capacity, self_id_, association_, message_id_, zone_id_, block_);
         break;
@@ -120,8 +133,9 @@ class ReadTransaction {
     if (!parse_header(frame, length, h)) return false;
     const uint8_t reply_type = kind_ == Kind::kRead ? kRead : kInit;
     if (kind_ == Kind::kZoneWrite) return false;  // the engine matches the block echo itself
-    if (h.reception != 0x81 || h.source != kIdBoiler || h.destination != self_id_ || h.association != association_ ||
-        h.message_id != message_id_)
+    const uint8_t reply_reception = kind_ == Kind::kSatelliteBlock ? static_cast<uint8_t>(connect_id_ | 0x80) : 0x81;
+    if (h.reception != reply_reception || h.source != kIdBoiler || h.destination != self_id_ ||
+        h.association != association_ || h.message_id != message_id_)
       return false;
     if (kind_ == Kind::kRead && h.type == (kRead | 0x80)) {
       refused_ = true;
@@ -140,9 +154,10 @@ class ReadTransaction {
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
-  enum class Kind : uint8_t { kRead, kHotWaterWrite, kZoneWrite, kSatelliteConsigne };
+  enum class Kind : uint8_t { kRead, kHotWaterWrite, kZoneWrite, kSatelliteConsigne, kSatelliteBlock };
   State state_ = State::kIdle;
   Kind kind_ = Kind::kRead;
+  uint8_t connect_id_ = kIdConnect;
   HotWaterMode mode_ = HotWaterMode::kUnknown;
   uint8_t frame_bits_ = 0;
   uint8_t self_id_ = kIdConnect;

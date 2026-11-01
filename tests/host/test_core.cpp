@@ -1899,6 +1899,62 @@ static void test_burner() {
     CHECK(!e.reading());
   }
 
+  // The satellite's block write-back, in its name (SATZ): only the mode may change, answered with reception FE.
+  {
+    const Bytes &known = F["payload_zone_relay_live"];  // mode 05, options 21
+    uint8_t frame[64];
+    CHECK(build_satellite_block(frame, sizeof(frame), kIdZone1, 0xFA, 0xA0, kIdConnect, known.data() + 15) == 63);
+    const Bytes head = {0x80, 0x08, 0xFA, 0xA0, 0x7E, 0x17, 0xA1, 0x54, 0x00, 0x15, 0xA1, 0x54, 0x00, 0x18, 0x30};
+    CHECK(Bytes(frame, frame + 15) == head);  // as the satellite's own, 01/11/2026 13:29:25
+    TxPolicy p = engine_policy(TxLevel::kWrite, false);
+    p.satellite_association = 0xFA;
+    TxClass cls;
+    CHECK(evaluate_tx(p, frame, 63, nullptr, 0, &cls, known.data() + 15) == TxVerdict::kBlockedLevel);
+    CHECK(cls == TxClass::kSatelliteBlock);
+    p.satellite_override = true;
+    CHECK(evaluate_tx(p, frame, 63, nullptr, 0, nullptr, known.data() + 15) == TxVerdict::kSend);
+    CHECK(evaluate_tx(p, frame, 63) == TxVerdict::kBlockedAddress);  // no known block
+    Bytes bad(frame, frame + 63);
+    bad[15] = 0x96;  // comfort changed: only the mode may differ
+    CHECK(evaluate_tx(p, bad.data(), 63, nullptr, 0, nullptr, known.data() + 15) == TxVerdict::kBlockedAddress);
+    bad.assign(frame, frame + 63);
+    bad[4] = 0x01;  // not to the Connect
+    CHECK(evaluate_tx(p, bad.data(), 63, nullptr, 0, nullptr, known.data() + 15) == TxVerdict::kBlockedIdentity);
+    bad.assign(frame, frame + 63);
+    bad[18] = 0x06;
+    bad[19] = 0x30;  // Confort with the frost bit: incoherent
+    CHECK(evaluate_tx(p, bad.data(), 63, nullptr, 0, nullptr, known.data() + 15) == TxVerdict::kBlockedAddress);
+
+    ConnectEngine s;
+    s.set_policy(p);
+    s.set_next_message_id(0x50);
+    s.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x13, 0x45, 0x00);
+    CHECK(!s.request_satellite_block(0x06));  // block unknown
+    ReadResult result;
+    s.on_frame(100, known.data(), known.size(), result);
+    TxRequest tx;
+    CHECK(s.poll(110, tx) && tx.kind == TxClass::kZoneAck);
+    CHECK(!s.request_satellite_block(0x09));
+    CHECK(s.request_satellite_block(0x06) && !s.request_satellite_block(0x06));
+    CHECK(s.poll(200, tx) && tx.kind == TxClass::kSatelliteBlock && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[1] == 0x08 && tx.frame[4] == 0x7E && tx.frame[18] == 0x06 && tx.frame[19] == 0x21);
+    // The boiler forwards it to the Connect (a relay, acknowledged), then answers the "satellite".
+    Bytes forward(63);
+    const Bytes fhead = {0x7E, 0x80, 0xE3, tx.frame[3], 0x08, 0x17, 0xA1, 0x54, 0x00, 0x15, 0xA1, 0x54, 0x00, 0x18, 0x30};
+    memcpy(forward.data(), fhead.data(), 15);
+    memcpy(forward.data() + 15, tx.frame + 15, 48);
+    CHECK(!s.on_frame(300, forward.data(), forward.size(), result));
+    TxRequest ack;
+    CHECK(s.poll(310, ack) && ack.kind == TxClass::kZoneAck && ack.verdict == TxVerdict::kSend);
+    CHECK(s.zone_block(0)[3] == 0x06);
+    Bytes reply(55);
+    const Bytes rhead = {0x08, 0x80, 0xFA, tx.frame[3], 0xFE, 0x17, 0x30};
+    memcpy(reply.data(), rhead.data(), 7);
+    memcpy(reply.data() + 7, tx.frame + 15, 48);
+    CHECK(s.on_frame(400, reply.data(), reply.size(), result) && result.kind == ReadKind::kSatelliteBlock);
+    CHECK(!s.reading());
+  }
+
   // Dual path: a zone write also sends the consigne directly, re-asserted after the satellite's own exchange.
   {
     const Bytes &known = F["payload_zone_relay_live"];  // mode 05, options 21, comfort 19.0

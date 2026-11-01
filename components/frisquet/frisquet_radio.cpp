@@ -288,6 +288,20 @@ static std::string format_network(const uint8_t *n) {
 
 bool FrisquetRadio::request_explore_read(const std::string &request) {
 #ifdef FRISQUET_TX_ENABLED
+  if (request.rfind("SATZ ", 0) == 0) {
+    // "SATZ <mode>": the zone 1 satellite's block write-back in its name, the known block with that mode (05..08).
+    unsigned mode = 0;
+    if (sscanf(request.c_str() + 5, "%x", &mode) != 1 || mode > 0xFF) {
+      ESP_LOGW(TAG, "SATZ request refused: expected 'SATZ <mode>' in hexadecimal (05 auto, 06, 07, 08)");
+      return false;
+    }
+    if (!this->engine_.request_satellite_block(static_cast<uint8_t>(mode))) {
+      ESP_LOGW(TAG, "SATZ request refused (satellite_override off, block unknown, bad mode, or one pending)");
+      return false;
+    }
+    ESP_LOGI(TAG, "SATZ block queued: mode %02X", mode);
+    return true;
+  }
   if (request.rfind("SAT ", 0) == 0) {
     // "SAT <16 hex digits>": one consigne exchange in the name of the zone 1 satellite (8 data bytes).
     uint8_t data[8];
@@ -610,6 +624,7 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
     case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
     case ::frisquet::TxClass::kZoneWrite: return "zone-write";
     case ::frisquet::TxClass::kSatelliteConsigne: return "satellite-consigne";
+    case ::frisquet::TxClass::kSatelliteBlock: return "satellite-block";
     case ::frisquet::TxClass::kAssociationConfirm: return "association-confirm";
     default: return "?";
   }
@@ -843,6 +858,9 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
     }
     case ::frisquet::ReadKind::kSatelliteConsigne:
       ESP_LOGI(TAG, "SAT consigne answered by the boiler: %s", format_hex_pretty(frame, length).c_str());
+      break;
+    case ::frisquet::ReadKind::kSatelliteBlock:
+      ESP_LOGI(TAG, "SATZ block answered by the boiler: %s", format_hex_pretty(frame, length).c_str());
       break;
     case ::frisquet::ReadKind::kStatus: {
       ::frisquet::SatelliteBroadcast status;

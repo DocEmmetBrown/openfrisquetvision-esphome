@@ -397,8 +397,10 @@ class ConnectEngine {
     // A zone write may only change the fields it was requested for, whatever the policy would allow.
     TxPolicy gate = policy_;
     if (zone_writing_) gate.zone_write_mask &= zone_fields_;
-    tx.verdict = evaluate_tx(gate, tx.frame, tx.length, nullptr, 0, &tx.kind,
-                             zone_writing_ && zone_confirmed_[zone_index_] ? zone_block_[zone_index_] : nullptr);
+    const uint8_t *reference = nullptr;
+    if (zone_writing_ && zone_confirmed_[zone_index_]) reference = zone_block_[zone_index_];
+    else if (current_kind_ == ReadKind::kSatelliteBlock && zone_confirmed_[0]) reference = zone_block_[0];
+    tx.verdict = evaluate_tx(gate, tx.frame, tx.length, nullptr, 0, &tx.kind, reference);
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
@@ -451,6 +453,29 @@ class ConnectEngine {
     return true;
   }
   bool direct_active() const { return direct_active_; }
+
+  // The zone 1 satellite's block write-back in its name: the known block with another mode, options as in
+  // request_zone_mode. The boiler then acts on it at once, as when the satellite itself has accepted a block
+  // (DESIGN 10.29).
+  bool request_satellite_block(uint8_t mode) {
+    if (!policy_.satellite_override || policy_.satellite_association == 0xFF || !zone_confirmed_[0] ||
+        sat_block_pending_ || mode < 0x05 || mode > 0x08)
+      return false;
+    memcpy(sat_block_, zone_block_[0], kZoneBlockSize);
+    uint8_t owned = 0;
+    switch (mode) {
+      case 0x05: owned = 0x04 | (sat_block_[4] & 0x01); break;
+      case 0x06: owned = 0x01; break;
+      case 0x07: owned = 0x00; break;
+      default: owned = 0x10; break;
+    }
+    sat_block_[3] = mode;
+    sat_block_[4] = static_cast<uint8_t>((sat_block_[4] & ~0x17) | owned);
+    if (!zone_block_allowed(kZoneFieldMode, sat_block_, zone_block_[0])) return false;
+    sat_block_pending_ = true;
+    enqueue_front_(ReadKind::kSatelliteBlock);
+    return true;
+  }
 
   // The consigne the satellite should send for `block` now (zone 1), from the last state page: ambient, mode byte and
   // following word copied, active setpoint resolved (in Auto from the programme at the boiler's time). False when it
@@ -594,6 +619,15 @@ class ConnectEngine {
       ++stats_.consignes_sent;
       return true;
     }
+    if (queue_length_ > 0 && queue_[0] == ReadKind::kSatelliteBlock && consigne_ok) {
+      for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
+      --queue_length_;
+      current_kind_ = ReadKind::kSatelliteBlock;
+      sat_block_pending_ = false;
+      transaction_.start_satellite_block(kIdZone1, policy_.satellite_association, next_id_, policy_.self_id,
+                                         sat_block_);
+      return true;
+    }
     // Reads and writes wait for the end of the satellites' window, except the live body read; acknowledgements never do.
     if (quiet) {
       if (near_zone1_exchange(clock_.seconds(now_ms))) return false;
@@ -680,6 +714,8 @@ class ConnectEngine {
   bool explore_refused_ = false;
   bool body_started_ = false;
   uint8_t consigne_data_[8] = {};
+  uint8_t sat_block_[kZoneBlockSize] = {};
+  bool sat_block_pending_ = false;
   bool consigne_pending_ = false;
   bool consigne_urgent_ = false;
   uint8_t consigne_id_ = 0;

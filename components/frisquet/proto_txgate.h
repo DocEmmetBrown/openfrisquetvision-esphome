@@ -26,7 +26,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck, kSatelliteBlock };
 
 // Which parts of a zone block a write may change; everything else must equal the last known block.
 constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
@@ -49,6 +49,34 @@ struct TxPolicy {
 };
 
 constexpr uint16_t kMaxReadWords = 0x40;
+
+// A zone block we may send: plausible setpoints and mode, and starting from the last known block (`reference`),
+// changing only the fields in `mask` (kZoneField*).
+inline bool zone_block_allowed(uint8_t mask, const uint8_t *data, const uint8_t *reference) {
+  // Setpoints are 0.5 degree steps in 5.0..30.0: raw 0..250, multiples of 5, frost <= reduced <= comfort.
+  for (int i = 0; i < 3; ++i)
+    if (data[i] > 250 || data[i] % 5 != 0) return false;
+  if (data[2] > data[1] || data[1] > data[0]) return false;
+  // Mode byte: auto, comfort, reduced or frost only.
+  if (data[3] < 0x05 || data[3] > 0x08) return false;
+  // Without the last known block nothing is sent.
+  if (!reference || mask == 0) return false;
+  if (!(mask & kZoneFieldSetpoints) && memcmp(data, reference, 3) != 0) return false;
+  if (!(mask & kZoneFieldMode) && memcmp(data + 3, reference + 3, 3) != 0) return false;
+  // The unknown byte is never ours to change.
+  if (data[5] != reference[5]) return false;
+  if (memcmp(data + 3, reference + 3, 2) != 0) {
+    // A mode change: the options byte must agree with the mode, keeping the bits we do not own.
+    const uint8_t options = data[4];
+    if ((options & ~0x17) != (reference[4] & ~0x17)) return false;
+    const uint8_t owned = options & 0x17;
+    const bool coherent = (data[3] == 0x05 && (owned & 0x14) == 0x04) || (data[3] == 0x06 && owned == 0x01) ||
+                          (data[3] == 0x07 && owned == 0x00) || (data[3] == 0x08 && owned == 0x10);
+    if (!coherent) return false;
+  }
+  if (!(mask & kZoneFieldProgram) && memcmp(data + 6, reference + 6, 42) != 0) return false;
+  return true;
+}
 // An answer holds at most 63 bytes: header, length byte and 0x1C words.
 constexpr uint16_t kMaxExploreWords = 0x1C;
 
@@ -112,6 +140,21 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     if (!policy.satellite_override) return TxVerdict::kBlockedLevel;
     return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
   }
+  if (header.type == kInit && !header.is_ack() && length == kZoneWriteLength && header.source >= kIdZone1 &&
+      header.source <= kIdZone3) {
+    // The zone 1 satellite's block write-back, in its name: only its mode and options may differ from the last
+    // known block (zone_reference), so that the boiler starts or stops heating at once (DESIGN 10.29).
+    cls = TxClass::kSatelliteBlock;
+    if (classified) *classified = cls;
+    if (header.destination != kIdBoiler || header.reception != policy.self_id || header.source != kIdZone1 ||
+        policy.satellite_association == 0xFF || header.association != policy.satellite_association)
+      return TxVerdict::kBlockedIdentity;
+    static const uint8_t kBody[9] = {0xA1, 0x54, 0x00, 0x15, 0xA1, 0x54, 0x00, 0x18, 0x30};
+    if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0) return TxVerdict::kBlockedAddress;
+    if (!zone_block_allowed(kZoneFieldMode, frame + 15, zone_reference)) return TxVerdict::kBlockedAddress;
+    if (!policy.satellite_override || policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
+    return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
+  }
   if ((header.type == kMemoryPush || header.type == kBoilerEvent) && header.reception == 0x85) {
     cls = TxClass::kPushAck;
     if (classified) *classified = cls;
@@ -152,33 +195,7 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   } else if (cls == TxClass::kZoneWrite) {
     static const uint8_t kBody[9] = {0xA1, 0x54, 0x00, 0x18, 0xA1, 0x54, 0x00, 0x18, 0x30};
     if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0) return TxVerdict::kBlockedAddress;
-    const uint8_t *data = frame + 15;
-    // Setpoints are 0.5 degree steps in 5.0..30.0: raw 0..250, multiples of 5, frost <= reduced <= comfort.
-    for (int i = 0; i < 3; ++i)
-      if (data[i] > 250 || data[i] % 5 != 0) return TxVerdict::kBlockedAddress;
-    if (data[2] > data[1] || data[1] > data[0]) return TxVerdict::kBlockedAddress;
-    // Mode byte: auto, comfort, reduced or frost only.
-    if (data[3] < 0x05 || data[3] > 0x08) return TxVerdict::kBlockedAddress;
-    // A write must start from the last known block: without it nothing is sent, and only the
-    // fields the policy allows may differ from it.
-    if (!zone_reference || policy.zone_write_mask == 0) return TxVerdict::kBlockedAddress;
-    if (!(policy.zone_write_mask & kZoneFieldSetpoints) && memcmp(data, zone_reference, 3) != 0)
-      return TxVerdict::kBlockedAddress;
-    if (!(policy.zone_write_mask & kZoneFieldMode) && memcmp(data + 3, zone_reference + 3, 3) != 0)
-      return TxVerdict::kBlockedAddress;
-    // The unknown byte is never ours to change.
-    if (data[5] != zone_reference[5]) return TxVerdict::kBlockedAddress;
-    if (memcmp(data + 3, zone_reference + 3, 2) != 0) {
-      // A mode change: the options byte must agree with the mode, keeping the bits we do not own.
-      const uint8_t options = data[4];
-      if ((options & ~0x17) != (zone_reference[4] & ~0x17)) return TxVerdict::kBlockedAddress;
-      const uint8_t owned = options & 0x17;
-      const bool coherent = (data[3] == 0x05 && (owned & 0x14) == 0x04) || (data[3] == 0x06 && owned == 0x01) ||
-                            (data[3] == 0x07 && owned == 0x00) || (data[3] == 0x08 && owned == 0x10);
-      if (!coherent) return TxVerdict::kBlockedAddress;
-    }
-    if (!(policy.zone_write_mask & kZoneFieldProgram) && memcmp(data + 6, zone_reference + 6, 42) != 0)
-      return TxVerdict::kBlockedAddress;
+    if (!zone_block_allowed(policy.zone_write_mask, frame + 15, zone_reference)) return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
   } else if (cls == TxClass::kHotWaterWrite) {
     // Exactly the write the MQTT firmware sends, with a known hot-water mode: nothing else.

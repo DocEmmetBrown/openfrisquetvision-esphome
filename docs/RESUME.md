@@ -7,14 +7,14 @@ Everything needed to pick the project up again. Detailed history and measurement
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.20-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.21-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes **19,0** (set by the user on the satellite, 31/10 12:22) / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Zone block on the board | confirmed; Hors gel block taken by the satellite 01/11 13:37:07, verified (state `20`, mode `10`) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested); `satellite_override: true` + `satellite_association: 0xFA` (direct consigne with zone 1 writes) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 878 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 898 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -29,8 +29,10 @@ Roadmap (DESIGN §10):
 00. **Direct consigne can stop heating but not start it** (DESIGN 10.28): with the boiler's zone block in Hors gel, a
    Confort consigne in the satellite's name leaves the boiler in standby (`20`). Demand starts at the first satellite frame
    after the satellite has accepted a Confort block. (A `0x40` seen at 13:30:05 was a bit error: CRC invalid, right with `00`.)
-   The user wants an immediate start: next experiment = write the zone block in the satellite's name (`A154`, like its own
-   write-back), then the direct consigne. The satellite also accepts block writes at `:x9:14`, and right after a press on « i ».
+   The user wants an immediate start. **Recipe found** (DESIGN 10.29, 0.7.21): block written in the satellite's name
+   (`SATZ <mode>`) + consigne in its name with the last word `A032 = 0000` ⇒ demand within seconds. Next: do it
+   automatically on zone 1 changes (with the normal zone write so the real satellite follows). The satellite also accepts
+   block writes at `:x9:14`, and right after a press on « i ».
 0. **Dual path: done** (DESIGN 10.26): zone 1 changes from HA take effect on the boiler within a second (direct consigne in
    the satellite's name), the satellite follows within 1-10 minutes. Logs: `build/logs/frisq-dual2.log`.
 1. **Live burner state: done** (DESIGN 10.23 – 10.24). « Chaudière brûleur » = last flue snapshot > 40 °C while there is a heating

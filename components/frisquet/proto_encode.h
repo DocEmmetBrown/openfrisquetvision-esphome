@@ -161,6 +161,27 @@ inline size_t build_satellite_consigne(uint8_t *out, size_t capacity, uint8_t zo
   return kSatelliteConsigneLength;
 }
 
+// The satellite's own block write-back after it accepted a block or was set by hand (seen 01/11/2026 13:29:25):
+//   80 <zone> <assoc> <id> <connect 7E> 17 A1 54 00 15 A1 54 00 18 30 <48-byte block>
+// The boiler stores the block, forwards it to the Connect (reception = zone) and, once that is acknowledged, answers
+//   <zone> 80 <assoc> <id> FE 17 30 <block>.
+inline size_t build_satellite_block(uint8_t *out, size_t capacity, uint8_t zone_id, uint8_t association,
+                                    uint8_t message_id, uint8_t connect_id, const uint8_t *block) {
+  if (!out || !block || capacity < kZoneWriteLength || zone_id < kIdZone1 || zone_id > kIdZone3) return 0;
+  Header h;
+  h.destination = kIdBoiler;
+  h.source = zone_id;
+  h.association = association;
+  h.message_id = message_id;
+  h.reception = connect_id;
+  h.type = kInit;
+  write_header(out, h);
+  static const uint8_t kBody[9] = {0xA1, 0x54, 0x00, 0x15, 0xA1, 0x54, 0x00, 0x18, 0x30};
+  memcpy(out + 6, kBody, sizeof(kBody));
+  memcpy(out + 15, block, kZoneBlockSize);
+  return kZoneWriteLength;
+}
+
 // Boiler pushes to the Connect when a setting is changed on its panel (seen 01/11/2026 12:42, ECS set by hand):
 //   7E 80 <assoc> <id> 05 10 <addr:2> <words:2> <length> <data>     MEMORY_PUSH (seen: A0F0 x0D)
 //   7E 80 <assoc> <id> 05 45 <21 bytes>                             BOILER_EVENT (frisquet-bridge, not seen here)

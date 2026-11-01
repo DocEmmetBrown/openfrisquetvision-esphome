@@ -357,6 +357,9 @@ Le bit 3 de l'état suit la **demande de chauffage des zones**, pas la flamme : 
 
 - une consigne écrite au nom du satellite (Confort 19,0 pour une ambiante de 16,7, mode `05` ou `01`) **ne la lance pas**
   (plus de 8 min, puis 6 min : état `20`, consigne de départ 19,8 puis 23,2), tant que le bloc de zone de la chaudière dit Hors gel ;
+- **[vérifié le 01/11, DESIGN 10.29]** elle démarre en quelques secondes quand la chaudière a un bloc Confort (écrit par le
+  satellite, ou en son nom) **et** reçoit la consigne au nom du satellite avec le dernier mot (`A032`) à `0000`. Avec `00C6`
+  (valeur habituelle du satellite) rien ne démarre ; le vrai satellite envoie `0000` juste après avoir accepté un bloc ;
 - elle apparaît à la **première trame du satellite qui suit son acceptation d'un bloc Confort** (31/10 : 4 min après ; 01/11 : moins
   de 40 s après la réécriture `A154` du satellite) ;
 - une consigne Hors gel écrite au nom du satellite **la coupe** en moins de 25 s.

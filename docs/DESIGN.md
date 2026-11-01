@@ -660,6 +660,31 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   satellite (comme sa réécriture `80 08 FA <id> 7E 17 A1 54 00 15 …`), puis la consigne directe.
 - État final vérifié 13:37 : Hors gel 8,0, état `20`, ECS Eco Horaires, consignes 19 / 17 / 8, programme d'origine.
 
+### 10.29 Démarrage immédiat : bloc au nom du satellite + dernier mot `0000` (01/11/2026 13:42 – 14:11)
+
+- `0.7.21` : commande `SATZ <mode>` (texte « Radio lecture exploratoire ») = la réécriture de bloc du satellite, en son nom
+  (`80 08 FA <id> 7E 17 A1 54 00 15 A1 54 00 18 30 <bloc>`), bloc connu avec un autre mode seulement (classe
+  `kSatelliteBlock` de la porte). La chaudière la traite comme celle du vrai satellite : transfert au Connect, accusé, réponse
+  `08 80 FA <id> FE 17 30 <bloc>` (14:00:44).
+- La trame du satellite de 13:29:21 (CRC invalide) est valide avec un bit corrigé : ambiante 16,8, consigne 19,0, mode `01` et
+  **dernier mot `0000`** (d'habitude `00C6` ; `0258` en chauffe le 31/10 12:00). Ce mot est `A032` (copié dans la page).
+- Essais (ambiante 16,3, lecture `A029` toutes les 6 – 9 s) :
+
+  | Heure | Bloc chaudière | Consigne envoyée (dernier mot) | État |
+  |---|---|---|---|
+  | 14:03:00 | Confort (`SATZ 06` à 14:00:44) | 19,0 (`00C6`) | `20` (43 s) |
+  | 14:04:18 | Confort | 19,0 (`0000`) | **`28` en < 9 s** |
+  | 14:05:11 | Hors gel (`SATZ 08`) + 8,0 (`00C6`) | | `20` en < 13 s |
+  | 14:05:37 | Hors gel | 19,0 (`0000`) | `20` (34 s) |
+  | 14:06:23 | Confort (`SATZ 06`, consigne déjà 19,0 / `0000`) | puis 19,0 (`00C6`) | **`28` en < 11 s**, maintenu |
+  | 14:07:39 | Hors gel + 8,0 (`00C6`) | | `20` en < 14 s |
+
+- **Recette** : bloc Confort au nom du satellite **et** consigne au nom du satellite avec `A032 = 0000` ⇒ demande en quelques
+  secondes. Le bloc seul, ou la consigne seule, ne suffisent pas. Pour arrêter : bloc Hors gel + consigne 8,0.
+- Brûleur : flamme environ 1 – 2 min après la demande ; il a encore brûlé jusqu'à ≈ 14:11 après le retour à `20` (14:07:58).
+- Le vrai satellite garde son propre bloc (Hors gel ici) : il le renvoie à son échange suivant. En production, l'écriture de
+  zone normale reste nécessaire pour qu'il suive.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
