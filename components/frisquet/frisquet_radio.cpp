@@ -1,4 +1,6 @@
 #include "frisquet_radio.h"
+
+#include <ctime>
 #include "zone_climate.h"
 
 #include <SPI.h>
@@ -624,6 +626,7 @@ void FrisquetRadio::setup() {
   }
   memcpy(this->applied_network_, this->active_network_, 4);
   this->radio_->setPacketReceivedAction(on_rx_irq);
+  this->publish_text_(kLastAlert, "Aucune");
 
 #ifdef FRISQUET_TX_ENABLED
   ::frisquet::TxPolicy policy;
@@ -823,7 +826,51 @@ void FrisquetRadio::handle_packet_() {
   this->publish_counters_();
 }
 
+void FrisquetRadio::update_boiler_state_(uint8_t raw) {
+  this->boiler_state_ = ::frisquet::decode_boiler_state(raw);
+  this->state_known_ = true;
+  const int fault = this->boiler_state_.fault || this->boiler_state_.anomaly ? 1 : 0;
+  if (fault == this->last_fault_) return;
+  if (fault) {
+    char text[48];
+    snprintf(text, sizeof(text), "%s (état %02X)",
+             this->boiler_state_.anomaly ? "Anomalie chaudière" : "Anomalie de liaison radio", raw);
+    ESP_LOGW(TAG, "Boiler state: %s", text);
+    this->publish_text_(kLastAlert, text);
+  } else if (this->last_fault_ == 1) {
+    ESP_LOGI(TAG, "Boiler state: anomaly cleared (état %02X)", raw);
+  }
+  this->last_fault_ = fault;
+  if (this->fault_sensor_ != nullptr) this->fault_sensor_->publish_state(fault);
+}
+
+// Alerts: a device's text alert (43) or a boiler event (45). True when the frame was one of them.
+bool FrisquetRadio::dispatch_alert_(const uint8_t *payload, size_t length) {
+  char text[80];
+  uint8_t source = 0;
+  if (::frisquet::decode_text_alert(payload, length, source, text, sizeof(text))) {
+    ESP_LOGW(TAG, "Alert from %02X: '%s'", source, text);
+    this->publish_text_(kLastAlert, text[0] ? text : "Aucune");
+    return true;
+  }
+  ::frisquet::BoilerEvent event;
+  if (::frisquet::decode_boiler_event(payload, length, event)) {
+    // The boiler's clock is local time stored as UTC (EXTERNAL-RESEARCH): print it as such.
+    const time_t t = event.time;
+    struct tm when;
+    gmtime_r(&t, &when);
+    char line[64];
+    snprintf(line, sizeof(line), "Événement appareil %02X code %02X (%02d/%02d %02d:%02d)", event.device, event.code,
+             when.tm_mday, when.tm_mon + 1, when.tm_hour, when.tm_min);
+    ESP_LOGW(TAG, "Boiler event: %s", line);
+    this->publish_text_(kLastAlert, line);
+    return true;
+  }
+  return false;
+}
+
 void FrisquetRadio::dispatch_(const uint8_t *payload, size_t length) {
+  if (this->dispatch_alert_(payload, length)) return;
   ::frisquet::SatelliteBroadcast broadcast;
   if (::frisquet::decode_satellite_broadcast(payload, length, broadcast)) {
     this->publish_satellite_broadcast_(broadcast);
@@ -953,8 +1000,7 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
         // Exploration (29/10): is this state byte live, unlike the 10-minute broadcast?
         ESP_LOGI(TAG, "Status A029: state=%02X mode=%02X clock %02X:%02X:%02X", status.state_raw, status.mode_raw[0],
                  status.hour, status.minute, status.second);
-        this->boiler_state_ = ::frisquet::decode_boiler_state(status.state_raw);
-        this->state_known_ = true;
+        this->update_boiler_state_(status.state_raw);
         this->burner_.set_heating_demand(this->boiler_state_.running);
         this->publish_burner_();
         this->publish_text_(kBoilerState, this->boiler_state_.fault ? "Anomalie"
@@ -1011,8 +1057,7 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
   this->publish_(kOutdoor, b.outdoor);
   this->publish_text_(kZone1Mode, zone_mode_name(::frisquet::decode_zone_mode(b.mode_raw[0]).mode));
 
-  this->boiler_state_ = ::frisquet::decode_boiler_state(b.state_raw);
-  this->state_known_ = true;
+  this->update_boiler_state_(b.state_raw);
   this->burner_.set_heating_demand(this->boiler_state_.running);
   this->publish_burner_();
   this->publish_text_(kBoilerState, this->boiler_state_.fault ? "Anomalie"

@@ -1951,6 +1951,25 @@ static void test_burner() {
     }
     CHECK(p && q);
   }
+  // Alerts: a satellite's low-battery text (43), "no alert", and a boiler event (45) [EXTERNAL-RESEARCH captures].
+  {
+    const Bytes battery = {0x80, 0x08, 0x00, 0xB4, 0x01, 0x43, 0x00, 0x1C, 'S', 'A', 'T', 'E', 'L', 'L', 'I', 'T',
+                           'E', ' ', 'Z', '1', 0x00, 'C', 'H', 'A', 'N', 'G', 'E', 'R', ' ', 'P', 'I', 'L', 'E', 'S',
+                           ' ', 0x00};
+    char text[80];
+    uint8_t source = 0;
+    CHECK(decode_text_alert(battery.data(), battery.size(), source, text, sizeof(text)) && source == 0x08);
+    CHECK(std::string(text) == "SATELLITE Z1 - CHANGER PILES");
+    const Bytes none = {0x80, 0x20, 0x00, 0x10, 0x01, 0x43, 0x00, 0x00};
+    CHECK(decode_text_alert(none.data(), none.size(), source, text, sizeof(text)) && text[0] == 0);
+    const Bytes answer = {0x08, 0x80, 0x00, 0xB4, 0x81, 0x43};
+    CHECK(!decode_text_alert(answer.data(), answer.size(), source, text, sizeof(text)));
+    const Bytes event = {0x7E, 0x80, 0xD5, 0x30, 0x05, 0x45, 0x02, 0x0A, 0x80, 0x31, 0x71, 0xC8, 0xE5, 0x6A};
+    BoilerEvent ev;
+    CHECK(decode_boiler_event(event.data(), event.size(), ev) && ev.device == 0x80 && ev.code == 0x31 &&
+          ev.time == 0x6AE5C871);
+    CHECK(decode_boiler_state(0x81).anomaly && decode_boiler_state(0x29).fault && !decode_boiler_state(0x28).anomaly);
+  }
   // Satellite silence guard: nothing in the satellite's name unless it was heard within 25 min.
   {
     const Bytes &known = F["payload_zone_relay_live"];

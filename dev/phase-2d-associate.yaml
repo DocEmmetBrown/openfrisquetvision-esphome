@@ -6,7 +6,15 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.31-phase-2d-associate"
+    version: "0.7.33-phase-2d-associate"
+  on_boot:
+    # Heltec V4: power the OLED (Vext, GPIO36 active low) before the I2C bus starts (bus priority 1000).
+    priority: 1100
+    then:
+      - lambda: |-
+          pinMode(36, OUTPUT);
+          digitalWrite(36, LOW);
+          delay(50);
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -59,6 +67,7 @@ frisquet:
   acks_sent:
     name: Radio accusés envoyés
   hot_water_temperature:
+    id: hot_water
     name: Chaudière ECS
   heating_body_temperature:
     name: Chaudière corps de chauffe
@@ -67,7 +76,13 @@ frisquet:
   flue_temperature:
     name: Chaudière fumées
   burner:
+    id: burner
     name: Chaudière brûleur
+  boiler_fault:
+    name: Chaudière anomalie
+  last_alert:
+    id: last_alert
+    name: Chaudière dernière alerte
   zone1_flow_temperature:
     name: Zone 1 départ
   zone1_flow_setpoint:
@@ -118,12 +133,16 @@ frisquet:
   rx_boosted_gain: true
   lna_bypass: false
   zone1_ambient_temperature:
+    id: z1_ambient
     name: Zone 1 température ambiante
   zone1_setpoint:
+    id: z1_setpoint
     name: Zone 1 consigne
   zone1_mode:
+    id: z1_mode
     name: Zone 1 mode
   boiler_state:
+    id: boiler_state
     name: Chaudière état
   boiler_clock:
     name: Chaudière horloge
@@ -194,6 +213,13 @@ climate:
     name: Zone 1
 
 switch:
+  # Heltec V4: Vext (GPIO36, active low) powers the OLED.
+  - platform: gpio
+    id: vext
+    pin: GPIO36
+    inverted: true
+    restore_mode: ALWAYS_ON
+    internal: true
   - platform: frisquet
     name: Radio arrêt d'urgence
     restore_mode: ALWAYS_OFF
@@ -223,3 +249,47 @@ text_sensor:
       name: Raison du dernier reset
   - platform: version
     name: ESPHome version
+
+# Heltec V4 OLED (SSD1306 128x64): SDA 17, SCL 18, reset 21.
+i2c:
+  id: oled_bus
+  sda: GPIO17
+  scl: GPIO18
+  frequency: 400kHz
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_big
+    size: 18
+    glyphs: " 0123456789.,:-°C/>"
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 11
+    glyphs: " !\"'()+,-./0123456789:;<>?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°éèêàçôûÉ"
+
+display:
+  - platform: ssd1306_i2c
+    i2c_id: oled_bus
+    model: "SSD1306 128x64"
+    address: 0x3C
+    reset_pin: GPIO21
+    contrast: 50%
+    update_interval: 5s
+    lambda: |-
+      // Line 1: zone 1 ambient -> active setpoint.
+      if (id(z1_ambient).has_state() && id(z1_setpoint).has_state())
+        it.printf(0, 0, id(font_big), "%.1f° > %.1f°", id(z1_ambient).state, id(z1_setpoint).state);
+      else
+        it.print(0, 0, id(font_big), "--.-° > --.-°");
+      // Line 2: zone 1 mode.
+      it.printf(0, 22, id(font_small), "Zone 1 : %s", id(z1_mode).has_state() ? id(z1_mode).state.c_str() : "?");
+      // Line 3: boiler state, flame, hot water.
+      std::string state = id(boiler_state).has_state() ? id(boiler_state).state : "?";
+      if (id(burner).has_state() && id(burner).state) state += " (flamme)";
+      if (id(hot_water).has_state())
+        it.printf(0, 36, id(font_small), "%s  ECS %.0f°", state.c_str(), id(hot_water).state);
+      else
+        it.printf(0, 36, id(font_small), "%s", state.c_str());
+      // Line 4: last alert.
+      it.printf(0, 50, id(font_small), "%s", id(last_alert).has_state() ? id(last_alert).state.c_str() : "");
+

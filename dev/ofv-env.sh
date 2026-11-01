@@ -11,5 +11,5 @@ else
   export OFV_WIFI_SSID OFV_WIFI_PASSWORD
 fi
 export PLATFORMIO_CORE_DIR="$HOME/.platformio-esphome"
-export OFV_DEVICE=10.35.5.18
+export OFV_DEVICE=10.35.5.140
 unset _ofv_root _ofv_backup

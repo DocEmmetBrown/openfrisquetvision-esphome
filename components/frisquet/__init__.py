@@ -37,7 +37,9 @@ CONF_EXPLORE = "explore"
 CONF_SATELLITE_OVERRIDE = "satellite_override"
 CONF_SATELLITE_ASSOCIATION = "satellite_association"
 CONF_BURNER = "burner"
+CONF_BOILER_FAULT = "boiler_fault"
 DEVICE_CLASS_HEAT = "heat"
+DEVICE_CLASS_PROBLEM = "problem"
 
 BOARDS = {
     # Heltec WiFi LoRa 32 V4.3: SX1262 + KCT8103L front-end module.
@@ -166,6 +168,9 @@ TEXT_SENSORS = {
     # Diagnostics read every hour: panel firmware (0x7931, "V19.01") and the paired devices' versions (0x7A30).
     "panel_version": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     "paired_versions": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # Last alert: a device's text alert (type 43, e.g. "SATELLITE Z1 - CHANGER PILES"), a boiler event (type 45), or an
+    # anomaly bit of the boiler state. "Aucune" once cleared.
+    "last_alert": text_sensor.text_sensor_schema(icon="mdi:alert-circle-outline"),
 }
 
 
@@ -227,6 +232,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_SATELLITE_ASSOCIATION): cv.hex_uint8_t,
         # Burner on: the live heating-body temperature rises (0xA05E every 15 s; ~30-40 s of thermal lag).
         cv.Optional(CONF_BURNER): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_HEAT),
+        # ON while the boiler state shows an anomaly bit (0x01 radio partner, 0x80 boiler).
+        cv.Optional(CONF_BOILER_FAULT): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_PROBLEM),
         **{cv.Optional(key): schema for key, schema in SENSORS.items()},
         **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
     }
@@ -282,3 +289,6 @@ async def to_code(config):
     if CONF_BURNER in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_BURNER])
         cg.add(var.set_burner_sensor(sens))
+    if CONF_BOILER_FAULT in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_BOILER_FAULT])
+        cg.add(var.set_fault_sensor(sens))

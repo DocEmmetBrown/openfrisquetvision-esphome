@@ -10,6 +10,7 @@ as soon as one word of it is invalid.
 Needs `explore: true` and a `type: explore` text entity named "Radio lecture exploratoire".
 """
 import asyncio
+import os
 import json
 import re
 import sys
@@ -17,7 +18,7 @@ import time
 
 import aioesphomeapi
 
-HOST = "10.35.5.18"
+HOST = os.environ.get("OFV_DEVICE", "10.35.5.140")
 ENTITY = "Radio lecture exploratoire"
 KEY = re.search(r'^api_key:\s*"?([^"\n]+)"?', open("dev/secrets.yaml").read(), re.M).group(1)
 # Reads wait out the satellites' window (:09:30 to :02:30, five minutes).

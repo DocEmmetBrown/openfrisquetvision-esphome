@@ -741,6 +741,19 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   retour 8,0 vérifié 20:09:19.
 - `dev/ofv_api.py` : actions `switch` et `climate`, et affichage de l'état du thermostat.
 
+### 10.33 Alertes et écran OLED (01/11/2026 21:15 – 21:30, `0.7.32` – `0.7.33`)
+
+- « Chaudière dernière alerte » (texte) : alerte texte d'un appareil (type `43`, « SATELLITE Z1 - CHANGER PILES » ;
+  `43 00 00` = « Aucune »), événement poussé par la chaudière (type `45` : appareil, code, heure ; déjà acquitté en `85`),
+  ou bit d'anomalie de l'état `A029` (`0x01` liaison radio, `0x80` chaudière). « Chaudière anomalie » (binaire,
+  `problem`) suit ces bits. Les trames `43` viennent du satellite : à son emplacement normal, la carte ne les entend pas.
+  Aucun `43` / `45` reçu à ce jour. 936 vérifications.
+- Écran OLED de la Heltec V4 (SSD1306 128×64, I2C SDA 17 / SCL 18, reset 21, alimentation `Vext` GPIO36 active à
+  l'état bas) : ambiante > consigne, mode de zone, état chaudière (+ flamme), ECS, dernière alerte ; contraste 50 %,
+  rafraîchi toutes les 5 s. `Vext` doit être allumé dans `on_boot` priorité 1100, avant le bus I2C (sinon SCL reste bas
+  et l'écran n'est pas trouvé).
+- La carte a changé d'adresse (DHCP) : **10.35.5.140** ; `dev/ofv_api.py` et `dev/ofv_scan.py` lisent `OFV_DEVICE`.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

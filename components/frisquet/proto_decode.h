@@ -68,7 +68,8 @@ inline OperatingMode decode_operating_mode(uint16_t raw) {
 
 // ----- Boiler state byte (broadcast to satellites) -----
 struct BoilerState {
-  bool fault = false;
+  bool fault = false;    // bit 0: anomaly with a radio partner (seen "anomalie avec Connect", DESIGN 10.3)
+  bool anomaly = false;  // bit 7: boiler anomaly [EXTERNAL-RESEARCH, Freedom; not seen here]
   bool running = false;
   bool heating_stopped = false;
 };
@@ -76,6 +77,7 @@ struct BoilerState {
 inline BoilerState decode_boiler_state(uint8_t raw) {
   BoilerState state;
   state.fault = (raw & 0x01) != 0;
+  state.anomaly = (raw & 0x80) != 0;
   state.heating_stopped = (raw & 0x04) != 0;
   state.running = (raw & 0x08) != 0;
   return state;
@@ -449,6 +451,66 @@ inline bool format_paired_versions(const uint8_t *frame, size_t length, char *te
     used += snprintf(text + used, capacity - used, "%s", item);
   }
   if (used == 0) snprintf(text, capacity, "aucun");
+  return true;
+}
+
+// Text alert (type 0x43), sent by a device to the boiler [EXTERNAL-RESEARCH 3.3, captures]:
+//   80 08 00 B4 01 43 00 1C "SATELLITE Z1\0CHANGER PILES \0"     low battery
+//   ... 43 00 00                                                    no alert (at start-up, daily at 04:00)
+// `text` gets the parts joined by " - ", empty for "no alert".
+constexpr uint8_t kTextAlert = 0x43;
+
+inline bool decode_text_alert(const uint8_t *frame, size_t length, uint8_t &source, char *text, size_t capacity) {
+  Header header;
+  if (!text || capacity < 2 || !parse_header(frame, length, header)) return false;
+  if (header.type != kTextAlert || header.is_ack() || length < 8) return false;
+  const size_t n = frame[7];
+  if (length < 8 + n) return false;
+  source = header.source;
+  size_t used = 0;
+  bool part_break = false, space = false;
+  for (size_t i = 0; i < n && used + 4 < capacity; ++i) {
+    const uint8_t c = frame[8 + i];
+    if (c == 0) {
+      part_break = true;
+      continue;
+    }
+    if (c == ' ') {
+      space = true;
+      continue;
+    }
+    if (c < 0x20 || c > 0x7E) continue;
+    if (used > 0 && part_break) {
+      text[used++] = ' ';
+      text[used++] = '-';
+      text[used++] = ' ';
+    } else if (used > 0 && space) {
+      text[used++] = ' ';
+    }
+    part_break = space = false;
+    text[used++] = static_cast<char>(c);
+  }
+  while (used > 0 && text[used - 1] == ' ') --used;
+  text[used] = 0;
+  return true;
+}
+
+// Event pushed by the boiler to the Connect (type 0x45, reception 05), acknowledged with 85 [EXTERNAL-RESEARCH 3.3]:
+//   7E 80 <assoc> <id> 05 45 02 0A <device> <code> <Unix time, little-endian> ...
+struct BoilerEvent {
+  uint8_t device = 0;
+  uint8_t code = 0;
+  uint32_t time = 0;
+};
+
+inline bool decode_boiler_event(const uint8_t *frame, size_t length, BoilerEvent &out) {
+  Header header;
+  if (!parse_header(frame, length, header)) return false;
+  if (header.type != 0x45 || header.source != kIdBoiler || header.reception != 0x05 || length < 14) return false;
+  out.device = frame[8];
+  out.code = frame[9];
+  out.time = static_cast<uint32_t>(frame[10]) | static_cast<uint32_t>(frame[11]) << 8 |
+             static_cast<uint32_t>(frame[12]) << 16 | static_cast<uint32_t>(frame[13]) << 24;
   return true;
 }
 

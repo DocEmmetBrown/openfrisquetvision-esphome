@@ -9,12 +9,13 @@
   dev/ofv_api.py climate <exact climate name> target <t> | mode <OFF|HEAT|AUTO> | preset <COMFORT|ECO|BOOST>
 """
 import asyncio
+import os
 import re
 import sys
 
 import aioesphomeapi
 
-HOST = "10.35.5.18"
+HOST = os.environ.get("OFV_DEVICE", "10.35.5.140")
 KEY = re.search(r'^api_key:\s*"?([^"\n]+)"?', open("dev/secrets.yaml").read(), re.M).group(1)
 
 

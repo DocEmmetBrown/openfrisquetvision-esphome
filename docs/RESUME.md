@@ -1,20 +1,20 @@
 # Resuming work (state at 01/11/2026 13:40)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.32); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
+(windows 10.1 → 10.33); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.31-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.140`) | **ESPHome `0.7.33-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes **19,0** (set by the user on the satellite, 31/10 12:22) / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
 | Zone block on the board | confirmed; Hors gel block taken by the satellite 01/11 13:37:07, verified (state `20`, mode `10`) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested); `satellite_override: true` + `satellite_association: 0xFA` (direct consigne with zone 1 writes) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 930 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 936 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -39,7 +39,9 @@ Roadmap (DESIGN §10):
    15 valid of ~24 regular exchanges before); satellite-silence guard (nothing in its name after 25 min without it).
    **0.7.31** (DESIGN 10.32): hourly diagnostics (panel V19.01, flow 20/60 °C, paired devices) and a climate entity
    « Zone 1 » (AUTO / HEAT + COMFORT/ECO / OFF = Hors gel, BOOST). With the satellite back at its normal place
-   (16:40) its own frames are not received, even with the boosted gain; the boiler's replies to it always are. The satellite also accepts block writes at `:x9:14`, and right
+   (16:40) its own frames are not received, even with the boosted gain; the boiler's replies to it always are.
+   **0.7.33** (DESIGN 10.33): « Chaudière dernière alerte » (43 / 45 / state bits) and « Chaudière anomalie »; OLED
+   display (Vext powered in on_boot before I2C). The board moved to **10.35.5.140** (DHCP; a reservation would help). The satellite also accepts block writes at `:x9:14`, and right
    after a press on « i ».
 0. **Dual path: done** (DESIGN 10.26): zone 1 changes from HA take effect on the boiler within a second (direct consigne in
    the satellite's name), the satellite follows within 1-10 minutes. Logs: `build/logs/frisq-dual2.log`.
@@ -133,15 +135,15 @@ before flashing it.
 
 ```sh
 cp dev/.esphome/build/frisquette/build/firmware.ota.bin /tmp/ofv.ota.bin
-J=$(mktemp); curl -s -c $J -o /dev/null --data-urlencode "password=admin" http://10.35.5.18/login
-curl -s -m300 -b $J -F "update=@/tmp/ofv.ota.bin;filename=firmware.bin" http://10.35.5.18/api/update; rm -f $J
+J=$(mktemp); curl -s -c $J -o /dev/null --data-urlencode "password=admin" http://10.35.5.140/login
+curl -s -m300 -b $J -F "update=@/tmp/ofv.ota.bin;filename=firmware.bin" http://10.35.5.140/api/update; rm -f $J
 # expect {"ok":true}, then the ESPHome API on port 6053 within ~20 s
 ```
 
-**ESPHome → ESPHome** (reboot test, new image): `. dev/ofv-env.sh && .venv/bin/esphome upload dev/<config>.yaml --device 10.35.5.18`
+**ESPHome → ESPHome** (reboot test, new image): `. dev/ofv-env.sh && .venv/bin/esphome upload dev/<config>.yaml --device 10.35.5.140`
 
 **Logs** (keep this running during the whole window): 
-`. dev/ofv-env.sh && .venv/bin/esphome logs dev/<config>.yaml --device 10.35.5.18 > /tmp/frisq.log 2>&1`
+`. dev/ofv-env.sh && .venv/bin/esphome logs dev/<config>.yaml --device 10.35.5.140 > /tmp/frisq.log 2>&1`
 
 **Read / act through the API**: `.venv/bin/python dev/ofv_api.py get "Radio réseau" "bloc mémorisé"`,
 `… set "Zone 1 consigne confort" 20.5`, `… press "Radio récupérer le NetworkID"`.
@@ -149,8 +151,8 @@ curl -s -m300 -b $J -F "update=@/tmp/ofv.ota.bin;filename=firmware.bin" http://1
 **Rollback ESPHome → MQTT** (since 28/10 the MQTT firmware is **not paired**: re-associate it right after, see §2):
 
 ```sh
-. dev/ofv-env.sh && .venv/bin/esphome upload dev/phase-2d-pairing.yaml --device 10.35.5.18 --file build/mqtt-b1e6934-heltec_V4_3.bin
-# then check the MQTT dashboard: login as above, GET http://10.35.5.18/api/dashboard
+. dev/ofv-env.sh && .venv/bin/esphome upload dev/phase-2d-pairing.yaml --device 10.35.5.140 --file build/mqtt-b1e6934-heltec_V4_3.bin
+# then check the MQTT dashboard: login as above, GET http://10.35.5.140/api/dashboard
 # expected: mqttConnected true, boiler.anomaly null, hotWaterMode "Eco Horaires", zone 1 Auto 20.0
 ```
 
@@ -172,7 +174,7 @@ extends = env:heltec_wifi_lora_32_V4_3
 platform = espressif32@7.0.0
 board_build.variants_dir = variants
 board_build.variant = heltec_V4
-upload_port = 10.35.5.18
+upload_port = 10.35.5.140
 extra_scripts =
 	pre:tools/generate_web_assets.py
 E
