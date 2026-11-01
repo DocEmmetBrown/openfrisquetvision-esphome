@@ -2140,10 +2140,23 @@ static void test_burner() {
       ++reads;
     }
   CHECK(reads == 3);  // 0, 15, 30 s (the :08 slot starts at 45 s)
+  // 0.7.20: in the satellites' window the live read still goes (a hot-water burn there was missed), only the 40 s around
+  // the zone 1 satellite's exchange are avoided, and nothing else is read.
   ConnectEngine q;
   q.set_policy(p);
-  q.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x50, 0x30);  // 0:30: quiet until 2:30
-  CHECK(!q.poll(0, tx) && !q.poll(60000, tx));
+  q.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x50, 0x30);  // 0:30, quiet until 2:30
+  int quiet_reads = 0;
+  for (uint32_t t = 0; t < 60000; t += 500)
+    if (q.poll(t, tx)) {
+      CHECK(be16(tx.frame + 6) == 0xA05E);
+      ++quiet_reads;
+    }
+  CHECK(quiet_reads == 4);  // 0, 15, 30, 45 s
+  ConnectEngine nz;
+  nz.set_policy(p);
+  nz.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x59, 0x50);  // 9:50: around the satellite's exchange
+  CHECK(!nz.poll(0, tx) && !nz.poll(30000, tx));                      // up to 0:20
+  CHECK(nz.poll(38500, tx) && be16(tx.frame + 6) == 0xA05E);         // 0:28.5
   ConnectEngine off;
   off.set_policy(engine_policy(TxLevel::kRead, true));
   off.clock().set_from_bcd(0, 0x26, 0x10, 0x31, 0x10, 0x57, 0x15);

@@ -562,8 +562,9 @@ class ConnectEngine {
     }
     if (hot_water_slot_.due(seconds, now_ms, kHotWaterModePeriod, kHotWaterModeOffset))
       enqueue_(ReadKind::kHotWaterMode);
-    // The live heating-body temperature (burner detection), outside the satellites' window.
-    if (policy_.live_body_reads && !in_quiet_window(seconds) &&
+    // The live heating-body temperature (burner detection): a 0.15 s read, so also in the satellites' window, except
+    // around the zone 1 satellite's own exchange (a hot-water burn there lasts 1-2 minutes and was missed before 0.7.20).
+    if (policy_.live_body_reads && !near_zone1_exchange(seconds) &&
         (!body_started_ || now_ms - last_body_ms_ >= kBodyReadPeriodMs)) {
       body_started_ = true;
       last_body_ms_ = now_ms;
@@ -593,8 +594,20 @@ class ConnectEngine {
       ++stats_.consignes_sent;
       return true;
     }
-    // Reads and writes wait for the end of the satellites' window; acknowledgements never do.
-    if (quiet) return false;
+    // Reads and writes wait for the end of the satellites' window, except the live body read; acknowledgements never do.
+    if (quiet) {
+      if (near_zone1_exchange(clock_.seconds(now_ms))) return false;
+      for (size_t i = 0; i < queue_length_; ++i) {
+        if (queue_[i] != ReadKind::kBody) continue;
+        for (size_t j = i + 1; j < queue_length_; ++j) queue_[j - 1] = queue_[j];
+        --queue_length_;
+        current_kind_ = ReadKind::kBody;
+        transaction_.start(policy_.self_id, policy_.association, next_id_, kAddrBodyLive, 0x01);
+        ++stats_.reads_started;
+        return true;
+      }
+      return false;
+    }
     // A requested hot-water change goes before any queued read.
     if (write_state_ == WriteState::kQueued) {
       transaction_.start_hot_water_write(policy_.self_id, policy_.association, next_id_, requested_mode_,
