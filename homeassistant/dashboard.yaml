@@ -1,14 +1,9 @@
 # Tableau de bord Home Assistant pour la chaudière Frisquet (frisquet.yaml).
+# Paramètres > Tableaux de bord > ajouter un tableau de bord > « Modifier » > ⋮ > « Éditeur de configuration brute »,
+# puis coller ce contenu.
 #
-# Modèle : remplacez PREFIXE par le préfixe de vos entités, puis collez le résultat dans Paramètres > Tableaux de bord >
-# ajouter un tableau de bord > « Modifier » > ⋮ > « Éditeur de configuration brute ».
-#
-# Le préfixe se lit sur n'importe quelle entité de la carte : climate.cuisine_frisquette_zone_1 → cuisine_frisquette
-# (il dépend du nom de l'appareil et, selon Home Assistant, de sa pièce ; avec frisquet.yaml tel quel : frisquet).
-#
-# Pour le faire automatiquement : python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml
-# Si vos entités n'ont pas toutes le même préfixe (certaines avec la pièce, d'autres sans, par exemple après avoir changé de
-# firmware), ajoutez --entites entites.txt : voir python3 homeassistant/dashboard.py --help.
+# Les identifiants sont ceux d'un appareil nommé « Frisquet » (climate.frisquet_zone_1…). Si les vôtres diffèrent
+# (autre nom, pièce dans le nom), générez la version adaptée : python3 homeassistant/dashboard.py cuisine_frisquette
 title: Chauffage
 views:
   - title: Chauffage
@@ -16,7 +11,7 @@ views:
     icon: mdi:radiator
     cards:
       - type: thermostat
-        entity: climate.PREFIXE_zone_1
+        entity: climate.frisquet_zone_1
         features:
           - type: climate-hvac-modes
             hvac_modes: [auto, heat, "off"]
@@ -27,56 +22,56 @@ views:
       - type: entities
         title: Zone 1
         entities:
-          - entity: sensor.PREFIXE_zone_1_temperature_ambiante
+          - entity: sensor.frisquet_zone_1_temperature_ambiante
             name: Ambiante
-          - entity: sensor.PREFIXE_zone_1_consigne
+          - entity: sensor.frisquet_zone_1_consigne
             name: Consigne active
-          - entity: select.PREFIXE_zone_1_mode_commande
+          - entity: select.frisquet_zone_1_mode_commande
             name: Mode
-          - entity: switch.PREFIXE_zone_1_boost
+          - entity: switch.frisquet_zone_1_boost
             name: Boost (+1 °C, 6 h max)
-          - entity: number.PREFIXE_zone_1_consigne_confort
+          - entity: number.frisquet_zone_1_consigne_confort
             name: Consigne confort
-          - entity: number.PREFIXE_zone_1_consigne_reduit
+          - entity: number.frisquet_zone_1_consigne_reduit
             name: Consigne réduit
-          - entity: number.PREFIXE_zone_1_consigne_hors_gel
+          - entity: number.frisquet_zone_1_consigne_hors_gel
             name: Consigne hors-gel
-          - entity: sensor.PREFIXE_zone_1_programme_lisible
+          - entity: sensor.frisquet_zone_1_programme_lisible
             name: Programme
 
       - type: entities
         title: Chaudière
         entities:
-          - entity: sensor.PREFIXE_chaudiere_etat
+          - entity: sensor.frisquet_chaudiere_etat
             name: État
-          - entity: binary_sensor.PREFIXE_chaudiere_bruleur
+          - entity: binary_sensor.frisquet_chaudiere_bruleur
             name: Brûleur
-          - entity: select.PREFIXE_chaudiere_mode_ecs
+          - entity: select.frisquet_chaudiere_mode_ecs
             name: Eau chaude
-          - entity: sensor.PREFIXE_chaudiere_eau_chaude
+          - entity: sensor.frisquet_chaudiere_eau_chaude
             name: Température eau chaude
-          - entity: sensor.PREFIXE_temperature_exterieure
+          - entity: sensor.frisquet_temperature_exterieure
             name: Extérieur
-          - entity: sensor.PREFIXE_zone_1_depart
+          - entity: sensor.frisquet_zone_1_depart
             name: Départ
-          - entity: sensor.PREFIXE_chaudiere_pression
+          - entity: sensor.frisquet_chaudiere_pression
             name: Pression
-          - entity: binary_sensor.PREFIXE_chaudiere_anomalie
+          - entity: binary_sensor.frisquet_chaudiere_anomalie
             name: Anomalie
-          - entity: sensor.PREFIXE_chaudiere_derniere_alerte
+          - entity: sensor.frisquet_chaudiere_derniere_alerte
             name: Dernière alerte
 
       - type: history-graph
         title: Températures (24 h)
         hours_to_show: 24
         entities:
-          - entity: sensor.PREFIXE_zone_1_temperature_ambiante
+          - entity: sensor.frisquet_zone_1_temperature_ambiante
             name: Ambiante
-          - entity: sensor.PREFIXE_zone_1_consigne
+          - entity: sensor.frisquet_zone_1_consigne
             name: Consigne
-          - entity: sensor.PREFIXE_temperature_exterieure
+          - entity: sensor.frisquet_temperature_exterieure
             name: Extérieur
-          - entity: binary_sensor.PREFIXE_chaudiere_bruleur
+          - entity: binary_sensor.frisquet_chaudiere_bruleur
             name: Brûleur
 
       - type: statistics-graph
@@ -85,28 +80,28 @@ views:
         period: day
         stat_types: [change]
         entities:
-          - entity: sensor.PREFIXE_consommation_chauffage_annee
+          - entity: sensor.frisquet_consommation_chauffage_annee
             name: Chauffage
-          - entity: sensor.PREFIXE_consommation_eau_chaude_annee
+          - entity: sensor.frisquet_consommation_eau_chaude_annee
             name: Eau chaude
 
       - type: entities
         title: Radio et association
         state_color: true
         entities:
-          - entity: sensor.PREFIXE_radio_reseau
+          - entity: sensor.frisquet_radio_reseau
             name: Réseau
-          - entity: sensor.PREFIXE_radio_association
+          - entity: sensor.frisquet_radio_association
             name: Dernière association
-          - entity: sensor.PREFIXE_zone_1_bloc
+          - entity: sensor.frisquet_zone_1_bloc
             name: Bloc de zone (doit être « confirmé »)
-          - entity: sensor.PREFIXE_zone_1_ecriture
+          - entity: sensor.frisquet_zone_1_ecriture
             name: Dernière écriture de zone
-          - entity: button.PREFIXE_radio_associer_le_connect
+          - entity: button.frisquet_radio_associer_le_connect
             name: Associer le Connect
-          - entity: sensor.PREFIXE_radio_signal
+          - entity: sensor.frisquet_radio_signal
             name: Signal
-          - entity: sensor.PREFIXE_radio_age_derniere_trame
+          - entity: sensor.frisquet_radio_age_derniere_trame
             name: Dernière trame
-          - entity: switch.PREFIXE_radio_arret_d_urgence
+          - entity: switch.frisquet_radio_arret_d_urgence
             name: Arrêt d'urgence (n'émet plus rien)

@@ -113,13 +113,11 @@ Bon à savoir :
 
 ## Home Assistant
 
-- **Tableau de bord** : [homeassistant/dashboard.yaml](homeassistant/dashboard.yaml) (thermostat, zone, chaudière,
-  historique, consommations, radio). C'est un modèle : remplacez `PREFIXE` par le préfixe de vos entités, lisible sur
-  n'importe laquelle (`climate.cuisine_frisquet_zone_1` → `cuisine_frisquet` ; il dépend du nom de l'appareil et de sa
-  pièce), ou générez-le : `python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml`. Si toutes vos entités n'ont
-  pas le même préfixe (entités reprises d'un ancien firmware), l'option `--entites` retrouve chacune dans la liste de vos
-  entités (`--help` explique comment l'obtenir depuis Home Assistant). Collez ensuite le résultat dans l'« éditeur de
-  configuration brute » d'un nouveau tableau de bord.
+- **Tableau de bord** prêt à coller : [homeassistant/dashboard.yaml](homeassistant/dashboard.yaml) (thermostat, zone,
+  chaudière, historique, consommations, radio), dans l'« éditeur de configuration brute » d'un nouveau tableau de bord. Il
+  suppose les identifiants par défaut (`climate.frisquet_zone_1`…). S'ils diffèrent chez vous (autre nom d'appareil, pièce
+  dans le nom), générez la version adaptée : `python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml`
+  (option `--entites` si les préfixes sont mélangés, voir `--help`).
 - **Blueprint de notification** (anomalie, pile du satellite) :
   [homeassistant/blueprints/automation/frisquet_alerte.yaml](homeassistant/blueprints/automation/frisquet_alerte.yaml), à
   copier dans `config/blueprints/automation/` de Home Assistant.

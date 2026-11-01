@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Écrit le tableau de bord Frisquet avec les identifiants de vos entités.
+"""Adapte le tableau de bord Frisquet (dashboard.yaml, écrit pour climate.frisquet_zone_1…) à vos entités.
 
     python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml
     python3 homeassistant/dashboard.py cuisine_frisquette --entites entites.txt > tableau.yaml
@@ -19,7 +19,7 @@ import pathlib
 import re
 import sys
 
-ENTITY = re.compile(r"\b([a-z_]+)\.PREFIXE_([a-z0-9_]+)")
+ENTITY = re.compile(r"\b(climate|sensor|binary_sensor|select|switch|number|button|text)\.frisquet_([a-z0-9_]+)")
 
 
 def main() -> None:
