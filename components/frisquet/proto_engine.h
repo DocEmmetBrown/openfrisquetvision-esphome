@@ -548,10 +548,11 @@ class ConnectEngine {
       zone_state_ = WriteState::kFailed;
       ++stats_.zone_writes_failed;
     }
-    // A direct consigne goes first. It waits for the end of the satellites' window too, unless it answers the
-    // satellite's own exchange, which has just ended (re-assertion).
+    // A direct consigne goes first, even in the satellites' window: only the 40 s around the zone 1 satellite's own
+    // exchange are avoided, unless it answers that exchange, which has just ended (re-assertion).
     const bool quiet = in_quiet_window(clock_.seconds(now_ms));
-    if (queue_length_ > 0 && queue_[0] == ReadKind::kSatelliteConsigne && (!quiet || consigne_urgent_)) {
+    const bool consigne_ok = consigne_urgent_ || !near_zone1_exchange(clock_.seconds(now_ms));
+    if (queue_length_ > 0 && queue_[0] == ReadKind::kSatelliteConsigne && consigne_ok) {
       for (size_t i = 1; i < queue_length_; ++i) queue_[i - 1] = queue_[i];
       --queue_length_;
       current_kind_ = ReadKind::kSatelliteConsigne;

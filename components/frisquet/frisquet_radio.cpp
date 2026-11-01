@@ -608,6 +608,8 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
     case ::frisquet::TxClass::kZoneAck: return "zone-ack";
     case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
     case ::frisquet::TxClass::kZoneWrite: return "zone-write";
+    case ::frisquet::TxClass::kSatelliteConsigne: return "satellite-consigne";
+    case ::frisquet::TxClass::kAssociationConfirm: return "association-confirm";
     default: return "?";
   }
 }

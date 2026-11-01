@@ -604,6 +604,18 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - **Défaut trouvé** : la réponse à notre consigne directe (12:37:46, page à 8,5 °C) a été prise pour l'échange du satellite et a fait
   effacer le bloc restauré (hors-gel 8,0 °C, jugé périmé). `0.7.17` : nos propres réponses ne servent plus à vérifier le bloc. Le bloc
   reste inconnu jusqu'au prochain changement fait sur le satellite ; essai du double envoi à faire ensuite.
+
+### 10.26 Double envoi sur la chaudière (01/11/2026 12:25 – 12:35)
+
+- La carte a tourné 23 h seule (5 315 lectures, 0 échec). Bloc réappris par un aller-retour sur le satellite (confort 19 → 19,5 → 19).
+- **Hors-gel 8,5 °C depuis HA** (12:26:08) : consigne directe **appliquée par la chaudière à 12:26:09** (0,13 s, `A029` et HA à 8,5) ;
+  bloc accepté par le satellite à 12:26:55 (47 s : encore éveillé après le réglage local), relais `08` à 12:27:00 accusé ; l'échange
+  régulier de 12:30:06 garde 8,5 °C (le satellite l'a adopté). **Le satellite affiche 8,5 °C** (utilisateur).
+- **Retour à 8,0 °C** (12:31:13, dans la fenêtre réservée) : consigne directe seulement à 12:32:24 (fin de fenêtre), bloc accepté au
+  créneau `:x4:37` (12:34:33). `0.7.18` : la consigne directe part aussi dans la fenêtre réservée, sauf 40 s autour de l'échange du
+  satellite de la zone 1 (`:x9:48 – :x0:28`) ; journal « satellite-consigne » au lieu de « ? ». Tests hôte : 853 vérifications.
+- Bilan : effet immédiat sur la chaudière, satellite mis à jour entre 1 et 10 minutes plus tard ; l'échange régulier ne réécrit pas
+  forcément la consigne (le 31/10 il l'avait remise, le satellite n'ayant pas encore le bloc).
 - Bouton « info » : il provoque un échange d'état du satellite (réponse de la chaudière entendue, « Chaudière horloge » mise à jour),
   mais une rafale envoyée aussitôt après (12:33:53) n'a abouti qu'au créneau `:x4:37` (12:34:31) : le satellite n'écoute pas les
   relais à ce moment-là, ou pas assez longtemps.

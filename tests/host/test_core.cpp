@@ -1919,6 +1919,28 @@ static void test_burner() {
       if (d.poll(t, tx) && tx.kind == TxClass::kSatelliteConsigne) extra = true;
     CHECK(!extra);
   }
+  // Timing (01/11 12:31: a request in the quiet window waited 71 s): the consigne goes even in the quiet window,
+  // except within 20 s of the zone 1 satellite's own exchange (:x0:08).
+  {
+    CHECK(near_zone1_exchange(0) && near_zone1_exchange(27) && !near_zone1_exchange(28));
+    CHECK(near_zone1_exchange(588) && !near_zone1_exchange(587) && !near_zone1_exchange(73));
+    const uint8_t data[8] = {0x00, 0xA9, 0x00, 0x50, 0x00, 0x10, 0x00, 0xC6};
+    TxPolicy qp = engine_policy(TxLevel::kWrite, false);
+    qp.satellite_override = true;
+    qp.satellite_association = 0xFA;
+    TxRequest tx;
+    ConnectEngine q1;
+    q1.set_policy(qp);
+    q1.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x12, 0x31, 0x13);  // :x1:13, quiet window
+    CHECK(q1.request_satellite_consigne(data));
+    CHECK(q1.poll(100, tx) && tx.kind == TxClass::kSatelliteConsigne);
+    ConnectEngine q2;
+    q2.set_policy(qp);
+    q2.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x12, 0x30, 0x05);  // :x0:05, the satellite's exchange
+    CHECK(q2.request_satellite_consigne(data));
+    CHECK(!q2.poll(100, tx));
+    CHECK(q2.poll(24000, tx) && tx.kind == TxClass::kSatelliteConsigne);  // :x0:29
+  }
   // Regression 31/10 12:37: the answer to our own consigne must not discard a restored block.
   {
     ConnectEngine r;

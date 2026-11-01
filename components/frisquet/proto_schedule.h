@@ -17,6 +17,14 @@ inline bool in_quiet_window(uint32_t seconds) {
   return phase < 150 || phase >= 570;
 }
 
+// Around the zone 1 satellite's own exchange (:x0:08, measured 08 +/- 2 s): no direct consigne there. A consigne is one
+// 0.15 s exchange, so outside these 40 s it may go even in the quiet window (zones 2 and 3, at :x1 and :x2, do not exist on
+// the reference installation: extend this window if they do).
+inline bool near_zone1_exchange(uint32_t seconds) {
+  const uint32_t phase = seconds % kSlotCycleSeconds;
+  return phase < 28 || phase >= 588;
+}
+
 class SlotSchedule {
  public:
   // True once per slot: `period` and `offset` in seconds, `seconds` the current clock,

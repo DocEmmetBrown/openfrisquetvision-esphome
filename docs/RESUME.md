@@ -1,20 +1,20 @@
-# Resuming work (state at 31/10/2026 13:30)
+# Resuming work (state at 01/11/2026 12:40)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.25); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
+(windows 10.1 → 10.26); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.17-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.18-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes **19,0** (set by the user on the satellite, 31/10 12:22) / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
-| Zone block on the board | **unknown** since 31/10 12:37: zone writes from HA are refused until a change is made on the satellite (any local change makes the boiler relay the block) |
+| Zone block on the board | confirmed (relearned 01/11 12:25) |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested); `satellite_override: true` + `satellite_association: 0xFA` (direct consigne with zone 1 writes) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 846 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 853 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -26,9 +26,8 @@ Roadmap (DESIGN §10):
 
 ## 2. Next steps
 
-0. **First, when resuming** (needs the user at the satellite): relearn the zone block (a change on the satellite, e.g. comfort
-   19 → 19,5 → 19), then try the dual path (« Zone 1 consigne hors-gel » 8,5 from HA: `A029` setpoint `0x55` within seconds,
-   block echo at the satellite's slot, satellite shows 8,5), then back to 8,0. Logs of the last windows: `build/logs/frisq-*.log`.
+0. **Dual path: done** (DESIGN 10.26): zone 1 changes from HA take effect on the boiler within a second (direct consigne in
+   the satellite's name), the satellite follows within 1-10 minutes. Logs: `build/logs/frisq-dual2.log`.
 1. **Live burner state: done** (DESIGN 10.23 – 10.24). « Chaudière brûleur » = last flue snapshot > 40 °C while there is a heating
    demand (state bit `0x08`; snapshots `79E6` at `:x3` and `7A02` at `:x8`), otherwise the slope of the live heating-body
    temperature `A05E` (hot water, 30-45 s lag). Possible follow-ups: ignore the slope ~2 min after a heating demand ends; set
@@ -65,12 +64,6 @@ Roadmap (DESIGN §10):
    - **Burner detection while heating**: done 31/10 (DESIGN 10.24): heating demand ⇒ flue snapshot (> 40 °C, twice per
      10 min), otherwise the body-temperature slope (hot water). Possible refinement: ignore the slope for ~2 min after a
      heating demand ends (the body keeps rising when the pump stops).
-   - **Direct setpoint + block (user idea, validated 31/10, DESIGN 10.25)**: implemented in `0.7.17` (with every zone 1 write
-     when `satellite_override` is set; re-assertion after the satellite's own exchange; our own answers ignored by the block
-     check). **Not yet tried on the boiler**: the zone block is unknown since 31/10 12:37 (erased by the SAT test, bug fixed),
-     so zone writes are refused until a change is made on the satellite (any local change makes the boiler relay the block).
-     Then: set « Zone 1 consigne hors-gel » to 8.5 from HA, check `A029` (setpoint 0x55) within seconds, the block echo at the
-     satellite's slot, then back to 8.0. Test command: `SAT <16 hex>` on « Radio lecture exploratoire ».
    - **Send zone writes when the satellite is awake**: an off-schedule boiler→satellite state answer means the satellite is
      awake (info button, or local change): send the pending burst at once, even in the quiet window (DESIGN 10.24).
    - **Merge zone requests**: a request made while a zone write is pending is refused today; merge it into the pending block
