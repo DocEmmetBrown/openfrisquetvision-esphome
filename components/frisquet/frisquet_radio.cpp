@@ -427,6 +427,10 @@ bool FrisquetRadio::start_association() {
     ESP_LOGW(TAG, "Association refused (a pairing session is already running)");
     return false;
   }
+  this->pairing_.set_confirm_payload(this->pairing_version_set_ ? this->pairing_version_ : nullptr);
+  if (this->pairing_version_set_)
+    ESP_LOGI(TAG, "Association: answering with version %02X %02X %02X %02X", this->pairing_version_[0],
+             this->pairing_version_[1], this->pairing_version_[2], this->pairing_version_[3]);
   ESP_LOGI(TAG, "Association: listening on the broadcast network for %u s (boiler in pairing mode)",
            static_cast<unsigned>(::frisquet::kPairingListenMs / 1000));
   this->pending_tx_valid_ = false;
@@ -499,6 +503,8 @@ void FrisquetRadio::pairing_step_(uint32_t now) {
 #ifdef FRISQUET_TX_ENABLED
       ::frisquet::TxPolicy policy = this->engine_.policy();
       policy.pairing = this->pairing_allowed_;
+      policy.pairing_version = this->pairing_version_set_;
+      memcpy(policy.pairing_payload, this->pairing_version_, 4);
       const ::frisquet::TxVerdict verdict = ::frisquet::evaluate_tx(
           policy, frame, length, this->pairing_.offer(), this->pairing_.offer_length());
       ESP_LOGI(TAG, "TX %s association-confirm %s", ::frisquet::verdict_name(verdict),

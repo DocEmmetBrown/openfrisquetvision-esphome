@@ -54,9 +54,11 @@ inline bool decode_association_offer(const uint8_t *frame, size_t length, Associ
   return true;
 }
 
-// Returns 0 when `offer` is not an association offer.
+// Returns 0 when `offer` is not an association offer. The 4-byte payload is the offered NetworkID echoed back (as
+// OpenFrisquetVisio does; works) or, when given, a version: a real Connect answers 01 21 01 02 (v21.01.02,
+// EXTERNAL-RESEARCH 3.5), which the boiler may record at 7A30.
 inline size_t build_association_confirm(const uint8_t *offer, size_t offer_length, uint8_t self_id, uint8_t *out,
-                                        size_t capacity) {
+                                        size_t capacity, const uint8_t *payload = nullptr) {
   AssociationOffer o;
   if (!out || capacity < kAssociationConfirmLength || !decode_association_offer(offer, offer_length, o)) return 0;
   out[0] = kIdBoiler;
@@ -65,7 +67,7 @@ inline size_t build_association_confirm(const uint8_t *offer, size_t offer_lengt
   out[3] = o.message_id;
   out[4] = static_cast<uint8_t>(o.reception | 0x80);
   out[5] = kAssociation;
-  memcpy(out + 6, o.network, 4);
+  memcpy(out + 6, payload ? payload : o.network, 4);
   return kAssociationConfirmLength;
 }
 
@@ -99,6 +101,12 @@ class PairingSession {
     deadline_ms_ = now_ms + listen_ms;
     state_ = PairingState::kListening;
     return true;
+  }
+
+  // The confirmation payload: a version (4 bytes), or nullptr to echo the NetworkID.
+  void set_confirm_payload(const uint8_t *payload) {
+    has_payload_ = payload != nullptr;
+    if (payload) memcpy(payload_, payload, 4);
   }
 
   // Back to the network the session started from. No-op when idle or finished.
@@ -139,7 +147,8 @@ class PairingSession {
       return false;
     }
     if (state_ != PairingState::kConfirming || static_cast<int32_t>(now_ms - next_confirm_ms_) < 0) return false;
-    length = build_association_confirm(offer_, offer_length_, self_id_, out, kAssociationConfirmLength);
+    length = build_association_confirm(offer_, offer_length_, self_id_, out, kAssociationConfirmLength,
+                                       has_payload_ ? payload_ : nullptr);
     if (length == 0) {
       cancel();
       return false;
@@ -174,6 +183,8 @@ class PairingSession {
   uint8_t previous_[4] = {0, 0, 0, 0};
   uint8_t committed_[4] = {0, 0, 0, 0};
   uint8_t learned_[4] = {0, 0, 0, 0};
+  uint8_t payload_[4] = {};
+  bool has_payload_ = false;
   uint8_t association_ = 0xFF;
   uint8_t offer_[kAssociationOfferLength] = {};
   size_t offer_length_ = 0;

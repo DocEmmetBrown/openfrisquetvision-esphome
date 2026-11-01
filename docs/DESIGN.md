@@ -754,6 +754,17 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   et l'écran n'est pas trouvé).
 - La carte a changé d'adresse (DHCP) : **10.35.5.140** ; `dev/ofv_api.py` et `dev/ofv_scan.py` lisent `OFV_DEVICE`.
 
+### 10.34 Ré-appairage avec version (01/11/2026 21:33, `0.7.34`)
+
+- Option YAML `pairing_version` (`"01:21:01:02"` sur la carte) : la confirmation d'association porte cette version au lieu
+  de l'écho du NetworkID (`build_association_confirm`, porte d'émission et `PairingSession` ; 947 vérifications).
+- Procédure : « Mise en service › Radio › Remplacer › Frisquet Connect » au panneau, écoute lancée, puis dernier OK ; offre
+  reçue 4,5 s après (`00 80 21 38 02 41 04 05 D9 8D C9`), confirmation `80 7E 21 38 82 41 01 21 01 02` ×10.
+  **Accepté** : nouvelle association **`21`** (était `D5`), NetworkID inchangé ; lectures normales aussitôt après.
+- `7A30` relu à 21:35:36 : toujours `0308 2700 FF7E FFFF` (pas de version enregistrée pour le Connect). L'exemple de la
+  recherche (`0220 2101`) désignait sans doute l'appareil `20` (sonde extérieure). À relire plus tard ; surveiller
+  l'arrivée de poussées `45`.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

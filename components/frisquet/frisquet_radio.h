@@ -123,6 +123,13 @@ class FrisquetRadio : public Component {
   }
   void set_rx_bandwidth(float value) { rx_bandwidth_ = value; }
   void set_rx_boosted_gain(bool value) { rx_boosted_gain_ = value; }
+  void set_pairing_version(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+    pairing_version_[0] = a;
+    pairing_version_[1] = b;
+    pairing_version_[2] = c;
+    pairing_version_[3] = d;
+    pairing_version_set_ = true;
+  }
   void set_lna_bypass(bool value) { lna_bypass_ = value; }
   void set_sensor(uint8_t id, sensor::Sensor *s) { if (id < kSensorCount) sensors_[id] = s; }
   void set_text_sensor(uint8_t id, text_sensor::TextSensor *s) { if (id < kTextCount) texts_[id] = s; }
@@ -243,6 +250,8 @@ class FrisquetRadio : public Component {
   ESPPreferenceObject network_pref_;
   float rx_bandwidth_{234.3f};
   bool rx_boosted_gain_{false};
+  uint8_t pairing_version_[4]{};
+  bool pairing_version_set_{false};
   int16_t rx_boosted_result_{1};  // 1: not asked, else the RadioLib status
   bool lna_bypass_{false};
   uint8_t tx_level_{0};

@@ -6,7 +6,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.33-phase-2d-associate"
+    version: "0.7.34-phase-2d-associate"
   on_boot:
     # Heltec V4: power the OLED (Vext, GPIO36 active low) before the I2C bus starts (bus priority 1000).
     priority: 1100
@@ -131,6 +131,8 @@ frisquet:
     name: Radio trames bloquées
   rx_bandwidth: 234.3
   rx_boosted_gain: true
+  # Answer the association offer with a version, as a real Connect (v21.01.02), instead of echoing the NetworkID.
+  pairing_version: "01:21:01:02"
   lna_bypass: false
   zone1_ambient_temperature:
     id: z1_ambient

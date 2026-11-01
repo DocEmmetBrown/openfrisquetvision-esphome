@@ -41,6 +41,8 @@ struct TxPolicy {
   uint8_t association = 0xFF;  // 0xFF = not associated: nothing may be sent
   uint8_t zone_write_mask = 0; // kZoneField* bits a zone write may change (0: zone writes refused)
   bool pairing = false;        // association confirmations allowed (YAML `pairing: true`)
+  bool pairing_version = false;   // the confirmation carries pairing_payload (a version) instead of the NetworkID
+  uint8_t pairing_payload[4] = {};
   bool explore_reads = false;  // reads of addresses outside the whitelist allowed (YAML `explore: true`)
   bool live_body_reads = false;  // read the live heating-body temperature (0xA05E) every 15 s
   // Consigne exchanges in the name of the zone 1 satellite (YAML satellite_override + its association byte).
@@ -115,7 +117,8 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     uint8_t expected[kAssociationConfirmLength];
     if (header.source != policy.self_id || header.destination != kIdBoiler) return TxVerdict::kBlockedIdentity;
     if (!relay ||
-        build_association_confirm(relay, relay_length, policy.self_id, expected, sizeof(expected)) !=
+        build_association_confirm(relay, relay_length, policy.self_id, expected, sizeof(expected),
+                                  policy.pairing_version ? policy.pairing_payload : nullptr) !=
             kAssociationConfirmLength ||
         memcmp(expected, frame, kAssociationConfirmLength) != 0)
       return TxVerdict::kBlockedAddress;

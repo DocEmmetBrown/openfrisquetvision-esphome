@@ -1951,6 +1951,32 @@ static void test_burner() {
     }
     CHECK(p && q);
   }
+  // Pairing answered with a version (a real Connect: 01 21 01 02) instead of the NetworkID echo.
+  {
+    const Bytes &offer = F["payload_association_offer"];
+    const uint8_t version[4] = {0x01, 0x21, 0x01, 0x02};
+    uint8_t echo[16], with_version[16];
+    CHECK(build_association_confirm(offer.data(), offer.size(), kIdConnect, echo, sizeof(echo)) == 10);
+    CHECK(build_association_confirm(offer.data(), offer.size(), kIdConnect, with_version, sizeof(with_version),
+                                    version) == 10);
+    CHECK(memcmp(echo, with_version, 6) == 0 && memcmp(with_version + 6, version, 4) == 0);
+    CHECK(memcmp(echo + 6, offer.data() + 7, 4) == 0);
+    TxPolicy p = engine_policy(TxLevel::kRead, false);
+    p.pairing = true;
+    CHECK(evaluate_tx(p, echo, 10, offer.data(), offer.size()) == TxVerdict::kSend);
+    CHECK(evaluate_tx(p, with_version, 10, offer.data(), offer.size()) == TxVerdict::kBlockedAddress);
+    p.pairing_version = true;
+    memcpy(p.pairing_payload, version, 4);
+    CHECK(evaluate_tx(p, with_version, 10, offer.data(), offer.size()) == TxVerdict::kSend);
+    CHECK(evaluate_tx(p, echo, 10, offer.data(), offer.size()) == TxVerdict::kBlockedAddress);
+    PairingSession session;
+    CHECK(session.start(PairingKind::kAssociate, kIdConnect, offer.data() + 7, 0));
+    session.set_confirm_payload(version);
+    CHECK(session.on_frame(10, offer.data(), offer.size()));
+    uint8_t out[16];
+    size_t n = 0;
+    CHECK(session.poll(20, out, n) && n == 10 && memcmp(out + 6, version, 4) == 0);
+  }
   // Alerts: a satellite's low-battery text (43), "no alert", and a boiler event (45) [EXTERNAL-RESEARCH captures].
   {
     const Bytes battery = {0x80, 0x08, 0x00, 0xB4, 0x01, 0x43, 0x00, 0x1C, 'S', 'A', 'T', 'E', 'L', 'L', 'I', 'T',
