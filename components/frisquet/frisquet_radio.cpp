@@ -606,6 +606,7 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
   switch (kind) {
     case ::frisquet::TxClass::kReadRequest: return "read";
     case ::frisquet::TxClass::kZoneAck: return "zone-ack";
+    case ::frisquet::TxClass::kPushAck: return "push-ack";
     case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
     case ::frisquet::TxClass::kZoneWrite: return "zone-write";
     case ::frisquet::TxClass::kSatelliteConsigne: return "satellite-consigne";

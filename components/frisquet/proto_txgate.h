@@ -26,7 +26,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck };
 
 // Which parts of a zone block a write may change; everything else must equal the last known block.
 constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
@@ -110,6 +110,16 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     if (ambient < 0 || ambient > 400 || setpoint < 50 || setpoint > 300 || setpoint % 5 != 0 || data[4] != 0)
       return TxVerdict::kBlockedAddress;
     if (!policy.satellite_override) return TxVerdict::kBlockedLevel;
+    return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
+  }
+  if ((header.type == kMemoryPush || header.type == kBoilerEvent) && header.reception == 0x85) {
+    cls = TxClass::kPushAck;
+    if (classified) *classified = cls;
+    if (header.source != policy.self_id || header.destination != kIdBoiler) return TxVerdict::kBlockedIdentity;
+    uint8_t expected[10];
+    const size_t n = relay ? build_push_ack(relay, relay_length, policy.self_id, expected, sizeof(expected)) : 0;
+    if (n == 0 || n != length || memcmp(expected, frame, n) != 0) return TxVerdict::kBlockedAddress;
+    if (policy.level < TxLevel::kAck) return TxVerdict::kBlockedLevel;
     return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
   }
   if (header.type == kRead && !header.is_ack()) {

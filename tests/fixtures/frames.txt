@@ -71,3 +71,11 @@ payload_zone_write_reply = 7E 80 E3 83 88 17 30 96 78 1E 05 25 00 00 00 F8 FF FF
 # Connect sent 10 times; the boiler accepted it and answered reads with association D5 from 22:30:04.
 payload_association_offer = 00 80 D5 D4 02 41 04 05 D9 8D C9
 payload_association_confirm = 80 7E D5 D4 82 41 05 D9 8D C9
+
+# Boiler push to the Connect after a hot-water setting changed on the boiler panel (2026-11-01 12:42:05), MEMORY_PUSH
+# (reception 05, type 10) of block A0F0 x0D; unacknowledged, it was repeated 4 times one second apart.
+payload_boiler_push_a0f0 = 7E 80 D5 68 05 10 A0 F0 00 0D 1A 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 AE 80 66 D3 00 00 00 00 00 90
+
+# The zone 1 satellite's own consigne exchange (2026-11-01 12:40:06): read A029 x15, write A02F x4 =
+# ambient 16.0, setpoint 8.0, 00, mode 10 (Hors gel), 00C6.
+payload_satellite_consigne = 80 08 FA 40 01 17 A0 29 00 15 A0 2F 00 04 08 00 A0 00 50 00 10 00 C6

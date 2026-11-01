@@ -28,6 +28,7 @@ struct EngineStats {
   uint32_t zone_bursts = 0;
   uint32_t zone_writes_acked = 0;
   uint32_t zone_writes_failed = 0;
+  uint32_t pushes = 0;  // boiler pushes (panel changes), each acknowledged
   uint32_t consignes_sent = 0;  // direct consigne exchanges in the satellite name
 };
 
@@ -197,6 +198,23 @@ class ConnectEngine {
 
   // Every validated frame. Returns true when it completes the running read.
   bool on_frame(uint32_t now_ms, const uint8_t *payload, size_t length, ReadResult &result) {
+    if (is_boiler_push(payload, length, policy_.self_id) && length <= sizeof(push_)) {
+      memcpy(push_, payload, length);
+      push_length_ = length;
+      push_ack_pending_ = true;
+      ++stats_.pushes;
+      // A push of A0F0 x0D ends with A0FC, the hot-water mode: follow a change made on the panel at once.
+      if (payload[5] == kMemoryPush && be16(payload + 6) == 0xA0F0 && be16(payload + 8) >= 0x0D &&
+          length >= 11 + 2 * 0x0D) {
+        const uint8_t raw = payload[11 + 2 * 12 + 1];
+        if (is_valid_hot_water_mode(raw & 0x7E)) {
+          hot_water_mode_ = static_cast<HotWaterMode>(raw & 0x7E);
+          hot_water_frame_bits_ = raw & 0x81;
+          hot_water_known_ = true;
+        }
+      }
+      return false;
+    }
     {
       SatelliteBroadcast page;
       Header h;
@@ -310,6 +328,16 @@ class ConnectEngine {
   // Call often. True when `tx` holds a frame whose verdict says how to treat it (kSend: transmit;
   // kDryRun: log only; blocked verdicts: counted, never transmitted).
   bool poll(uint32_t now_ms, TxRequest &tx) {
+    if (push_ack_pending_) {
+      push_ack_pending_ = false;
+      tx.length = build_push_ack(push_, push_length_, policy_.self_id, tx.frame, sizeof(tx.frame));
+      if (tx.length == 0) return false;
+      tx.verdict = evaluate_tx(policy_, tx.frame, tx.length, push_, push_length_, &tx.kind);
+      if (tx.verdict == TxVerdict::kSend) ++stats_.acks_sent;
+      else if (tx.verdict == TxVerdict::kDryRun) ++stats_.dry_runs;
+      else ++stats_.acks_blocked;
+      return true;
+    }
     if (ack_pending_) {
       ack_pending_ = false;
       tx.length = build_zone_ack(relay_, relay_length_, policy_.self_id, tx.frame, sizeof(tx.frame));
@@ -667,6 +695,9 @@ class ConnectEngine {
   uint8_t hot_water_frame_bits_ = 0;
   bool hot_water_known_ = false;
   bool ack_pending_ = false;
+  bool push_ack_pending_ = false;
+  uint8_t push_[64] = {};
+  size_t push_length_ = 0;
   uint8_t zone_block_[3][kZoneBlockSize] = {};
   bool zone_known_[3] = {};
   bool zone_confirmed_[3] = {};

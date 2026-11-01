@@ -161,4 +161,39 @@ inline size_t build_satellite_consigne(uint8_t *out, size_t capacity, uint8_t zo
   return kSatelliteConsigneLength;
 }
 
+// Boiler pushes to the Connect when a setting is changed on its panel (seen 01/11/2026 12:42, ECS set by hand):
+//   7E 80 <assoc> <id> 05 10 <addr:2> <words:2> <length> <data>     MEMORY_PUSH (seen: A0F0 x0D)
+//   7E 80 <assoc> <id> 05 45 <21 bytes>                             BOILER_EVENT (frisquet-bridge, not seen here)
+// Unacknowledged, the boiler repeats it 4 times one second apart. The official Connect answers (frisquet-bridge):
+//   80 7E <assoc> <id> 85 10 <addr:2> <words:2>                     (10 bytes)
+//   80 7E <assoc> <id> 85 45                                        (6 bytes)
+constexpr uint8_t kMemoryPush = 0x10;
+constexpr uint8_t kBoilerEvent = 0x45;
+
+inline bool is_boiler_push(const uint8_t *frame, size_t length, uint8_t self_id) {
+  Header h;
+  if (!parse_header(frame, length, h)) return false;
+  if (h.source != kIdBoiler || h.destination != self_id || h.reception != 0x05) return false;
+  if (h.type == kMemoryPush) return length >= 11;
+  return h.type == kBoilerEvent;
+}
+
+inline size_t build_push_ack(const uint8_t *push, size_t push_length, uint8_t self_id, uint8_t *out,
+                             size_t capacity) {
+  if (!out || capacity < 10 || !is_boiler_push(push, push_length, self_id)) return 0;
+  Header h;
+  parse_header(push, push_length, h);
+  Header a;
+  a.destination = kIdBoiler;
+  a.source = self_id;
+  a.association = h.association;
+  a.message_id = h.message_id;
+  a.reception = 0x85;
+  a.type = h.type;
+  write_header(out, a);
+  if (h.type != kMemoryPush) return 6;
+  memcpy(out + 6, push + 6, 4);
+  return 10;
+}
+
 }  // namespace frisquet

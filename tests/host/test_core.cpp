@@ -1803,6 +1803,53 @@ static void test_pairing() {
 // flame 10:54:35 - 10:56:30 (user), water opened ~10:53.
 static void test_burner() {
   using namespace frisquet;
+  // Boiler push (panel change, 01/11 12:42): acknowledged at once with the address and size echoed.
+  {
+    const Bytes &push = F["payload_boiler_push_a0f0"];
+    CHECK(push.size() == 37 && is_boiler_push(push.data(), push.size(), kIdConnect));
+    CHECK(!is_boiler_push(push.data(), push.size(), 0x08));
+    uint8_t ack[16];
+    CHECK(build_push_ack(push.data(), push.size(), kIdConnect, ack, sizeof(ack)) == 10);
+    const Bytes expected = {0x80, 0x7E, 0xD5, 0x68, 0x85, 0x10, 0xA0, 0xF0, 0x00, 0x0D};
+    CHECK(Bytes(ack, ack + 10) == expected);
+    Bytes event = {0x7E, 0x80, 0xD5, 0x21, 0x05, 0x45};
+    event.resize(27, 0x00);
+    CHECK(build_push_ack(event.data(), event.size(), kIdConnect, ack, sizeof(ack)) == 6);
+    CHECK(ack[4] == 0x85 && ack[5] == 0x45 && ack[3] == 0x21);
+    TxPolicy p;
+    p.level = TxLevel::kAck;
+    p.dry_run = false;
+    p.association = 0xD5;
+    TxClass cls;
+    CHECK(evaluate_tx(p, expected.data(), expected.size(), push.data(), push.size(), &cls) == TxVerdict::kSend);
+    CHECK(cls == TxClass::kPushAck);
+    CHECK(evaluate_tx(p, expected.data(), expected.size()) == TxVerdict::kBlockedAddress);  // no push to answer
+    Bytes forged = expected;
+    forged[7] = 0xFC;
+    CHECK(evaluate_tx(p, forged.data(), forged.size(), push.data(), push.size()) == TxVerdict::kBlockedAddress);
+    p.level = TxLevel::kRead;
+    CHECK(evaluate_tx(p, expected.data(), expected.size(), push.data(), push.size()) == TxVerdict::kBlockedLevel);
+
+    ConnectEngine e;
+    e.set_policy(engine_policy(TxLevel::kAck, false));
+    TxPolicy ep = e.policy();
+    ep.association = 0xD5;
+    e.set_policy(ep);
+    e.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x12, 0x40, 0x05);  // quiet window: acknowledgements still go
+    ReadResult result;
+    CHECK(!e.on_frame(100, push.data(), push.size(), result));
+    TxRequest tx;
+    CHECK(e.poll(110, tx) && tx.kind == TxClass::kPushAck && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.length == 10 && Bytes(tx.frame, tx.frame + 10) == expected);
+    CHECK(e.stats().pushes == 1);
+    CHECK(e.hot_water_mode_known() && e.hot_water_mode() == HotWaterMode::kEcoScheduled);  // 0x90 at A0FC
+    CHECK(!e.poll(120, tx));
+    // The satellite's own consigne exchange has the format our direct consigne uses.
+    const Bytes &sat = F["payload_satellite_consigne"];
+    uint8_t ours[32];
+    CHECK(build_satellite_consigne(ours, sizeof(ours), kIdZone1, 0xFA, sat[3], sat.data() + 15) == sat.size());
+    CHECK(Bytes(ours, ours + sat.size()) == sat);
+  }
   // Consigne exchange in the name of the zone 1 satellite (31/10 test of direct setpoints).
   {
     const uint8_t data[8] = {0x00, 0xB2, 0x00, 0x55, 0x00, 0x10, 0x00, 0xC6};  // ambient 17.8, setpoint 8.5, Hors gel
