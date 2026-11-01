@@ -95,7 +95,7 @@ commandes de zone sont acceptées dès que « Zone 1 bloc » vaut **confirmé** 
 
 | Entité | Rôle |
 |---|---|
-| `climate.frisquet_zone_1` | Thermostat : mode, préréglage, consigne du mode actif |
+| Zone 1 (thermostat) | Mode, préréglage, consigne du mode actif |
 | Zone 1 mode (commande) | Auto, Dérogation Confort / Réduit, Confort, Réduit, Hors Gel |
 | Zone 1 consigne confort / réduit / hors-gel | Consignes (pas de 0,5 °C) |
 | Zone 1 boost | +1 °C sur la consigne confort, en Confort ou en période confort ; arrêt automatique après 6 h |
@@ -113,13 +113,15 @@ Bon à savoir :
 
 ## Home Assistant
 
-- **Tableau de bord** prêt à coller : [homeassistant/dashboard.yaml](homeassistant/dashboard.yaml) (thermostat, zone,
-  chaudière, historique, consommations, radio).
+- **Tableau de bord** : [homeassistant/dashboard.yaml](homeassistant/dashboard.yaml) (thermostat, zone, chaudière,
+  historique, consommations, radio). C'est un modèle : remplacez `PREFIXE` par le préfixe de vos entités, lisible sur
+  n'importe laquelle (`climate.cuisine_frisquette_zone_1` → `cuisine_frisquette` ; il dépend du nom de l'appareil et de sa
+  pièce), ou générez-le : `python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml`. Collez ensuite le résultat
+  dans l'« éditeur de configuration brute » d'un nouveau tableau de bord.
 - **Blueprint de notification** (anomalie, pile du satellite) :
   [homeassistant/blueprints/automation/frisquet_alerte.yaml](homeassistant/blueprints/automation/frisquet_alerte.yaml), à
   copier dans `config/blueprints/automation/` de Home Assistant.
 
-Les identifiants d'entités supposent le nom d'appareil `frisquet` (substitution `name` de `frisquet.yaml`).
 
 ## Écran
 

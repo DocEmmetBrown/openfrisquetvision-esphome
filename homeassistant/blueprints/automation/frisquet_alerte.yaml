@@ -7,16 +7,20 @@ blueprint:
   input:
     anomalie:
       name: Capteur d'anomalie
-      default: binary_sensor.frisquet_chaudiere_anomalie
+      description: "« Chaudière anomalie » de la carte Frisquet"
       selector:
         entity:
-          domain: binary_sensor
+          filter:
+            - integration: esphome
+              domain: binary_sensor
     alerte:
       name: Capteur de dernière alerte
-      default: sensor.frisquet_chaudiere_derniere_alerte
+      description: "« Chaudière dernière alerte » de la carte Frisquet"
       selector:
         entity:
-          domain: sensor
+          filter:
+            - integration: esphome
+              domain: sensor
     notification:
       name: Service de notification
       description: "Par exemple notify.mobile_app_mon_telephone"
