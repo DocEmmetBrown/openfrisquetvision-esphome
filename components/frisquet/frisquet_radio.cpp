@@ -1131,18 +1131,26 @@ void FrisquetRadio::dump_config() {
   ESP_LOGCONFIG(TAG, "Frisquet radio:");
   ESP_LOGCONFIG(TAG, "  Pins: CS=%u IRQ=%u RST=%u BUSY=%u SCK=%u MISO=%u MOSI=%u", this->cs_, this->irq_, this->reset_,
                 this->busy_, this->sck_, this->miso_, this->mosi_);
-  if (!::frisquet::is_usable_network(this->active_network_))
+  // Braces everywhere: below the CONFIG log level these macros expand to nothing.
+  if (!::frisquet::is_usable_network(this->active_network_)) {
     ESP_LOGCONFIG(TAG, "  Network ID: not paired yet (pairing: « Radio associer le Connect »)");
-  else
+  } else {
     ESP_LOGCONFIG(TAG, "  Network ID: %s (%s)", format_network(this->active_network_).c_str(),
                   this->network_learned_ ? "learned by pairing" : "YAML");
-  if (this->network_learned_ && ::frisquet::is_usable_network(this->network_id_))
+  }
+  if (this->network_learned_ && ::frisquet::is_usable_network(this->network_id_)) {
     ESP_LOGCONFIG(TAG, "  YAML network ID: %s", format_network(this->network_id_).c_str());
+  }
   ESP_LOGCONFIG(TAG, "  Association confirmations: %s", this->pairing_allowed_ ? "allowed" : "refused");
   ESP_LOGCONFIG(TAG, "  RX bandwidth: %.1f kHz", this->rx_bandwidth_);
-  if (this->rx_boosted_result_ == 1) ESP_LOGCONFIG(TAG, "  RX boosted gain: off");
-  else ESP_LOGCONFIG(TAG, "  RX boosted gain: %s", this->rx_boosted_result_ == RADIOLIB_ERR_NONE ? "on" : "FAILED");
-  if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
+  if (this->rx_boosted_result_ == 1) {
+    ESP_LOGCONFIG(TAG, "  RX boosted gain: off");
+  } else {
+    ESP_LOGCONFIG(TAG, "  RX boosted gain: %s", this->rx_boosted_result_ == RADIOLIB_ERR_NONE ? "on" : "FAILED");
+  }
+  if (this->fem_) {
+    ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
+  }
 #ifdef FRISQUET_TX_ENABLED
   ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s",
                 this->tx_level_ >= 3 ? "reads + zone acks + hot-water mode and zone 1 setpoint, mode and programme writes"

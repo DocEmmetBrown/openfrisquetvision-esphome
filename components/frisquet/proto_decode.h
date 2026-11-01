@@ -367,7 +367,7 @@ inline size_t format_program_ranges(const uint8_t *program, char *out, size_t ca
       const bool on = slot < 48 && (program[day * 6 + slot / 8] >> (slot % 8)) & 1;
       if (on && start < 0) start = slot;
       if (!on && start >= 0) {
-        char range[20];
+        char range[24];
         snprintf(range, sizeof(range), " %02d:%02d-%02d:%02d", start / 2, start % 2 * 30, slot / 2,
                  slot % 2 * 30);
         put(range);

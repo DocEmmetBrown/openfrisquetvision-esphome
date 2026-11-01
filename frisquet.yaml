@@ -14,10 +14,6 @@ esphome:
   project:
     name: openfrisquetvisio.esphome
     version: "1.0.0"
-  platformio_options:
-    board_build.flash_mode: qio
-    board_build.f_flash: 80000000L
-    board_build.f_cpu: 240000000L
   on_boot:
     # Écran OLED de la Heltec V4 : allumer son alimentation (Vext, GPIO36 active à l'état bas) avant le bus I2C.
     priority: 1100
