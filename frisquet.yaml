@@ -29,6 +29,9 @@ esp32:
   flash_size: 16MB
   framework:
     type: arduino
+    # Si le journal de démarrage affiche « Set flash_chip: boya under esp32 > framework > advanced », ajouter :
+    # advanced:
+    #   flash_chip: boya
 
 external_components:
   # Le composant est téléchargé depuis GitHub (mis en cache un jour). Pour développer sur une copie locale :
