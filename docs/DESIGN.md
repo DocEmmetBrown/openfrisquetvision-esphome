@@ -1,5 +1,8 @@
 # OpenFrisquetVisio ESPHome — Document de conception
 
+> Le NetworkID de l'installation de référence est masqué en `AA:BB:CC:DD` (les CRC des trames citées restent ceux du vrai
+> identifiant).
+
 > **Statut : brouillon v0.1, à valider ensemble.** Aucun code n'est écrit.
 > Les points marqués **[DÉCISION]** attendent votre arbitrage (section 11).
 
@@ -449,10 +452,10 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 
 ### 10.15 Fenêtre de récupération du NetworkID sans mode association du 27/10/2026 (12:06 – 12:10, `tx: write`, `pairing: false`)
 
-- Démarrage sur `05:D9:8D:C9 (YAML), association E3` ; bloc de zone restauré comme en 10.13.
+- Démarrage sur `AA:BB:CC:DD (YAML), association E3` ; bloc de zone restauré comme en 10.13.
 - 12:09:02 : bouton « récupérer le NetworkID », chaudière **pas** en mode association : passage sur `FF:FF:FF:FF`, **rien émis**
   pendant 30 s (une lecture `A063` partie à 12:09:02.03 attendait sa réponse ; seul un bruit `INVALID_LENGTH` reçu).
-- 12:09:32 : `failed`, retour sur `05:D9:8D:C9` ; la lecture interrompue est renvoyée (même id) 20 ms après et répondue aussitôt,
+- 12:09:32 : `failed`, retour sur `AA:BB:CC:DD` ; la lecture interrompue est renvoyée (même id) 20 ms après et répondue aussitôt,
   lectures 5/5, 0 trame bloquée. C'est le chemin du bug du 25/10, vérifié sur la carte.
 - Bouton « oublier » sans réseau appris : reste sur le YAML. Retour au firmware MQTT à 12:10 : aucune anomalie.
 - Reste : une offre réelle (chaudière en mode association) en récupération seule, puis, éventuellement, l'association.
@@ -462,11 +465,11 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - 22:21 : MQTT → ESPHome `0.7.0-phase-2d-pairing` (`pairing: false`). Zone 1 était passée en Hors Gel 8,0 depuis la veille (côté
   satellite).
 - 22:22:49 et 22:24:50 : deux récupérations du NetworkID (écoute 30 s) pendant « Partenaires > Ajouter > Connect » : la chaudière
-  répond aussitôt « terminé », **rien reçu** sur `FF:FF:FF:FF`, retour sur `05:D9:8D:C9` à chaque fois ; l'association `E3` reste
+  répond aussitôt « terminé », **rien reçu** sur `FF:FF:FF:FF`, retour sur `AA:BB:CC:DD` à chaque fois ; l'association `E3` reste
   valide (lectures 4/4 à 22:24). Cause : un Connect était déjà associé.
 - 22:28 : `0.7.1-phase-2d-associate` (`pairing: true`). L'utilisateur efface le Connect sur la chaudière puis relance « Ajouter ».
-- 22:29:31 : bouton « associer le Connect ». **22:29:38 : offre reçue** `00 80 D5 D4 02 41 04 05 D9 8D C9` (−99,5 dBm), 10 confirmations
-  `80 7E D5 D4 82 41 05 D9 8D C9` en 0,36 s (porte : `SEND`), réseau appris `05:D9:8D:C9` (identique), **association `D5`** sauvegardée.
+- 22:29:31 : bouton « associer le Connect ». **22:29:38 : offre reçue** `00 80 D5 D4 02 41 04 AA BB CC DD` (−99,5 dBm), 10 confirmations
+  `80 7E D5 D4 82 41 AA BB CC DD` en 0,36 s (porte : `SEND`), réseau appris `AA:BB:CC:DD` (identique), **association `D5`** sauvegardée.
   La chaudière affiche OK. 22:30:04 : lectures 4/4 avec `D5`.
 - 22:33 : `0.7.2-phase-2d-associate` (identique + `api: reboot_timeout: 0s`, pour fonctionner sans client API) ; après le
   redémarrage, réseau `appris` et association `D5` relus de la flash.
@@ -759,7 +762,7 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
 - Option YAML `pairing_version` (`"01:21:01:02"` sur la carte) : la confirmation d'association porte cette version au lieu
   de l'écho du NetworkID (`build_association_confirm`, porte d'émission et `PairingSession` ; 947 vérifications).
 - Procédure : « Mise en service › Radio › Remplacer › Frisquet Connect » au panneau, écoute lancée, puis dernier OK ; offre
-  reçue 4,5 s après (`00 80 21 38 02 41 04 05 D9 8D C9`), confirmation `80 7E 21 38 82 41 01 21 01 02` ×10.
+  reçue 4,5 s après (`00 80 21 38 02 41 04 AA BB CC DD`), confirmation `80 7E 21 38 82 41 01 21 01 02` ×10.
   **Accepté** : nouvelle association **`21`** (était `D5`), NetworkID inchangé ; lectures normales aussitôt après.
 - `7A30` relu à 21:35:36 : toujours `0308 2700 FF7E FFFF` (pas de version enregistrée pour le Connect). L'exemple de la
   recherche (`0220 2101`) désignait sans doute l'appareil `20` (sonde extérieure). À relire plus tard ; surveiller

@@ -36,34 +36,32 @@ Un seul Connect par chaudière : si vous avez un Frisquet Connect officiel, la c
 
 ## Installation
 
-### 1. Préparer
+### 1. Principe
 
-1. Téléchargez ce dépôt (`git clone` ou « Download ZIP »).
-2. Installez ESPHome : `pip install esphome` (ou le module ESPHome de Home Assistant, voir plus bas).
-3. Copiez `secrets.yaml.example` en `secrets.yaml` et remplissez-le (Wi-Fi, clé API, mot de passe OTA).
+Deux façons de faire, au choix : depuis le **module ESPHome de Home Assistant** (rien à installer sur un ordinateur), ou avec
+ESPHome en ligne de commande. Dans les deux cas, seul `frisquet.yaml` est nécessaire : le composant est téléchargé depuis
+ce dépôt GitHub.
 
 Aucune autre valeur n'est à fournir : le réseau radio de la chaudière et les identifiants sont appris à l'association.
 
 ### 2. Flasher la carte
 
-Branchez la carte en USB, puis depuis le dossier du dépôt :
+**Avec le module ESPHome de Home Assistant** :
+
+1. Dans `/config/esphome/secrets.yaml` (bouton « Secrets » du module), ajoutez les clés de
+   [secrets.yaml.example](secrets.yaml.example) : `wifi_ssid`, `wifi_password`, `api_key`, `ota_password`.
+2. **Nouvel appareil** › continuer › ignorer l'installation, puis **Modifier** l'appareil créé et remplacez tout son contenu par
+   celui de [frisquet.yaml](frisquet.yaml).
+3. **Installer** : par câble USB la première fois (« Brancher sur cet ordinateur »), sans fil ensuite.
+
+**En ligne de commande** (`pip install esphome`) : copiez `frisquet.yaml` et `secrets.yaml.example` (renommé
+`secrets.yaml`, à remplir) dans un dossier, branchez la carte en USB, puis :
 
 ```bash
 esphome run frisquet.yaml
 ```
 
-Choisissez le port USB. Les mises à jour suivantes passent par le Wi-Fi (`esphome run frisquet.yaml` propose la carte).
-
-Avec le **module ESPHome de Home Assistant** :
-
-1. Copiez le dossier `components/frisquet` de ce dépôt dans `/config/esphome/components/frisquet` sur Home Assistant
-   (module Samba, Studio Code Server ou SSH). Une fois le dépôt publié, la source GitHub indiquée dans `frisquet.yaml`
-   remplace cette copie.
-2. Dans `/config/esphome/secrets.yaml`, ajoutez les clés de `secrets.yaml.example` (`wifi_ssid`, `wifi_password`, `api_key`,
-   `ota_password`).
-3. Dans ESPHome : **Nouvel appareil** › continuer › ignorer l'installation, puis **Modifier** l'appareil créé et remplacer tout
-   son contenu par celui de `frisquet.yaml`.
-4. **Installer** : par câble USB la première fois (« Brancher sur cet ordinateur »), sans fil ensuite.
+Les mises à jour suivantes passent par le Wi-Fi.
 
 Pour remplacer un firmware ESPHome déjà installé sur la carte sous un autre nom, ajoutez temporairement
 `use_address: <adresse IP de la carte>` sous `wifi:` pour la première installation sans fil, et gardez le même
@@ -83,7 +81,7 @@ Sur le panneau de la chaudière :
 4. Dans Home Assistant, appuyez sur **« Radio associer le Connect »** (la carte écoute 30 s).
 5. Validez aussitôt **OK** sur la chaudière. L'association se fait en quelques secondes.
 
-« Radio réseau » affiche alors le réseau et l'association (par exemple `05:D9:8D:C9 (appris), association 21`). C'est gardé en
+« Radio réseau » affiche alors le réseau et l'association (par exemple `AA:BB:CC:DD (appris), association 21`). C'est gardé en
 mémoire, y compris après une coupure de courant. Si la chaudière répond « terminé » sans rien attendre, passez d'abord par
 **Effacer › Connect**, puis **Ajouter**.
 
@@ -171,4 +169,4 @@ Les journaux détaillés : `esphome logs frisquet.yaml` (passer `logger: level` 
 ## Crédits et licence
 
 Protocole d'origine : [OpenFrisquetVisio](https://github.com/FreedomNX/OpenFrisquetVisio) et la communauté (voir
-[docs/EXTERNAL-RESEARCH.md](docs/EXTERNAL-RESEARCH.md)). Licence : à préciser (dépend de celle du projet amont).
+[docs/EXTERNAL-RESEARCH.md](docs/EXTERNAL-RESEARCH.md)). Code et documentation de ce dépôt : licence [MIT](LICENSE).

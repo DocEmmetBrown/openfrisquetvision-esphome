@@ -35,14 +35,12 @@ esp32:
     type: arduino
 
 external_components:
-  # Copie locale du composant : dossier `components/frisquet` à côté de ce fichier (racine du dépôt, ou
-  # /config/esphome/components/frisquet avec le module ESPHome de Home Assistant). Une fois le dépôt publié, on peut
-  # utiliser sa source GitHub à la place, par exemple :
-  #   - source: github://<compte>/openfrisquetvision-esphome
+  # Le composant est téléchargé depuis GitHub (mis en cache un jour). Pour développer sur une copie locale :
+  #   - source:
+  #       type: local
+  #       path: components
   #     components: [frisquet]
-  - source:
-      type: local
-      path: components
+  - source: github://DocEmmetBrown/openfrisquetvision-esphome
     components: [frisquet]
 
 logger:

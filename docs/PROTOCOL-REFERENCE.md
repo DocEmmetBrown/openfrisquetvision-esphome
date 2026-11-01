@@ -6,7 +6,8 @@ refaire la rétro-ingénierie. Il est **autonome** : il ne suppose ni le code de
 - Statut de chaque fait : **[vérifié]** = observé sur l'air ou testé sur la chaudière de référence (oct. 2026) ;
   **[MQTT]** = repris du firmware OpenFrisquetVisio, non observé ici ; **[hypothèse]** = déduction non confirmée.
 - Installation de référence : chaudière Frisquet à une seule zone, satellite d'ambiance Z1 sans fil, pas de sonde extérieure,
-  carte Heltec WiFi LoRa 32 V4.3 (SX1262). NetworkID `05:D9:8D:C9`. Association du Connect `21` depuis le 01/11 21:33 (`D5` du 28/10 au 01/11, `E3` avant).
+  carte Heltec WiFi LoRa 32 V4.3 (SX1262). NetworkID masqué en `AA:BB:CC:DD` dans ce document (les CRC des exemples de
+  trames restent ceux du vrai identifiant ; les trames de [`tests/fixtures/frames.txt`](../tests/fixtures/frames.txt) sont intactes). Association du Connect `21` depuis le 01/11 21:33 (`D5` du 28/10 au 01/11, `E3` avant).
 - Notation : octets en hexadécimal, mots de 16 bits **big-endian**, adresses mémoire en mots (`A029 x15` = 0x15 mots à partir de `A029`).
 - Historique et mesures détaillées : [DESIGN.md](DESIGN.md) §10 ; état des connaissances au fil de l'eau : [PROTOCOL.md](PROTOCOL.md) ;
   trames réelles : [`tests/fixtures/frames.txt`](../tests/fixtures/frames.txt).
@@ -50,7 +51,7 @@ Vecteurs de test (octets sur l'air après le mot de synchronisation) :
 |---|---|
 | lecture `79F2` | `0A 80 7E D5 88 01 03 79 F2 00 1C EB A6` |
 | réponse `A0FC` | `09 7E 80 D5 8B 81 03 02 00 90 AA EA` |
-| confirmation d'association | `0A 80 7E D5 D4 82 41 05 D9 8D C9 91 1D` |
+| confirmation d'association | `0A 80 7E D5 D4 82 41 AA BB CC DD 91 1D` |
 
 ### 1.2 Réception : glissements de bit **[vérifié]**
 
@@ -127,7 +128,7 @@ Environ **7 s** après le dernier OK, sur le mot de synchronisation **`FF FF FF 
 
 ```
 <dest> 80 <assoc> <id> <réception> 41 04 <NetworkID:4>
-00     80 D5      D4   02          41 04 05 D9 8D C9        (exemple réel)
+00     80 D5      D4   02          41 04 AA BB CC DD        (exemple réel)
 ```
 
 `assoc` est le **nouvel octet d'association** attribué. Le destinataire (`00`) et la réception (`02`) n'ont pas besoin d'être vérifiés.
@@ -139,7 +140,7 @@ longueur** dans les données :
 
 ```
 80 <soi> <assoc> <id> <réception|80> 41 <NetworkID:4>
-80 7E    D5      D4   82             41 05 D9 8D C9         (10 octets)
+80 7E    D5      D4   82             41 AA BB CC DD         (10 octets)
 ```
 
 Puis revenir sur le NetworkID et utiliser `assoc` dans toutes les trames suivantes. La chaudière affiche OK et répond aussitôt aux
@@ -147,7 +148,7 @@ lectures portant la nouvelle association.
 
 **Variante avec version [vérifié le 01/11/2026]** : un vrai Connect met sa **version** à la place du NetworkID (`01 21 01 02`,
 v21.01.02, d'après d33d33). La chaudière l'accepte de même : « Mise en service › Radio › Remplacer › Frisquet Connect »,
-offre `00 80 21 38 02 41 04 05 D9 8D C9`, réponse `80 7E 21 38 82 41 01 21 01 02`, nouvelle association `21`, lectures
+offre `00 80 21 38 02 41 04 AA BB CC DD`, réponse `80 7E 21 38 82 41 01 21 01 02`, nouvelle association `21`, lectures
 normales aussitôt. `7A30 – 7A33` (section 8) n'a pas changé ensuite (`FF7E FFFF` : pas de version enregistrée pour le Connect).
 
 **Récupérer seulement le NetworkID** : écouter une offre sans y répondre. Il faut donc que la chaudière en émette une : supprimer

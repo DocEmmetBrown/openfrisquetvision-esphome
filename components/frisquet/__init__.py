@@ -162,7 +162,7 @@ TEXT_SENSORS = {
     "zone_program": text_sensor.text_sensor_schema(),
     # Zone 1 block: inconnu / restauré (non confirmé) / confirmé. Writes need "confirmé".
     "zone_block_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
-    # Network in use: "05:D9:8D:C9 (YAML), association E3" or "(appris)" once pairing learned it.
+    # Network in use: "AA:BB:CC:DD (YAML), association E3" or "(appris)" once pairing learned it.
     "network": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     # Last pairing session: listening, confirming, succeeded, failed, cancelled.
     "pairing_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),

@@ -1,5 +1,8 @@
 # Protocole radio Frisquet (état des connaissances)
 
+> Le NetworkID de l'installation de référence est masqué en `AA:BB:CC:DD` (les CRC des trames citées restent ceux du vrai
+> identifiant).
+
 Journal des découvertes. **Pour réimplémenter, lire plutôt [PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (référence autonome).
 
 Source : rétro-ingénierie d'OpenFrisquetVisio, vérifiée sur des trames réelles capturées le 25/10/2026
@@ -125,7 +128,7 @@ Une lecture est **refusée en entier** dès qu'un de ses mots est invalide (rép
 
 | Plage | Contenu (interprétation) |
 |---|---|
-| `7919 – 7965` | `791A – 791B` NetworkID `05D9 8DC9` ; `791C…` **table des associations** (`FA00`, `FA08` satellite Z1, `D57E` Connect, `FFFF` libres) ; `793A` identifiant `AE80 66D3` ; `793E – 7956` paramètres par circuit (`4B08 143C`, `4B0F 1450`… : bornes de départ ?) |
+| `7919 – 7965` | `791A – 791B` NetworkID `AABB CCDD` ; `791C…` **table des associations** (`FA00`, `FA08` satellite Z1, `D57E` Connect, `FFFF` libres) ; `793A` identifiant `AE80 66D3` ; `793E – 7956` paramètres par circuit (`4B08 143C`, `4B0F 1450`… : bornes de départ ?) |
 | `79E0 – 7A4F` | deux **instantanés** de même structure (`79E0`, rafraîchi vers `:x2` ; `79FC`, vers `:x8`) : ECS, corps de chauffe, départs, fumées… ; `79F2` (ambiantes, consignes, extérieure) ; `7A18` (consommations aux mots 9 et 10, toujours nulles ici) ; `7A16` compteur (+1 par seconde environ) |
 | `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure **en direct**, état et jour, NetworkID, `0080` (lu par la sonde extérieure) |
 | `A029 – A09B` | `A029` : **état en direct** (extérieure, date, état, zones ; voir la diffusion) ; `A041` : copie décalée ; **`A05E` = température du corps de chauffe en direct** (dixièmes de °C ; suit la flamme avec ~30 s d'inertie, voir DESIGN 10.23) ; `A063 – A09A` consommations annuelles (nulles) |
@@ -160,11 +163,11 @@ la chaudière répond aussitôt « terminé » sans rien émettre** (deux écout
 « Partenaires > Effacer > Connect », ce qui invalide l'association en cours.
 
 L'offre arrive ~7 s après l'appui, sur le mot de synchronisation `FF:FF:FF:FF`, en 11 octets :
-`<dest> 80 <association> <id> <réception> 41 04 <NetworkID:4>`, par exemple `00 80 D5 D4 02 41 04 05 D9 8D C9`
+`<dest> 80 <association> <id> <réception> 41 04 <NetworkID:4>`, par exemple `00 80 D5 D4 02 41 04 AA BB CC DD`
 (destinataire `00`, réception `02`, NetworkID de l'installation inchangé, **nouvel octet d'association `D5`**).
 Une **récupération du NetworkID** se contente d'écouter cette offre (30 s au plus). Une **association** répond, toujours sur le
 réseau de diffusion, 10 fois à 30 ms d'intervalle, par l'en-tête de réponse suivi du NetworkID, **sans octet de longueur**
-(10 octets) : `80 <soi> <association> <id> <réception|0x80> 41 <NetworkID:4>`, ici `80 7E D5 D4 82 41 05 D9 8D C9` ; la
+(10 octets) : `80 <soi> <association> <id> <réception|0x80> 41 <NetworkID:4>`, ici `80 7E D5 D4 82 41 AA BB CC DD` ; la
 chaudière affiche alors OK et répond aux lectures avec la nouvelle association. Le destinataire de l'offre n'est pas vérifié.
 
 ## Inventaire des trames de la chaudière (capture du 29/10/2026 16:13 – 16:45, `dev/ofv_frames.py`)

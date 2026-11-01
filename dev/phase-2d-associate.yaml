@@ -56,7 +56,6 @@ debug:
 
 frisquet:
   board: heltec_v4_3
-  network_id: "05:D9:8D:C9"
   tx: write
   dry_run: false
   association: 0x21  # learned on 01/11 21:33 (re-pairing with version)

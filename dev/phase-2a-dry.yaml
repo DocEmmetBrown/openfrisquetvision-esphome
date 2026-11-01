@@ -46,7 +46,7 @@ debug:
 
 frisquet:
   board: heltec_v4_3
-  network_id: "05:D9:8D:C9"
+  network_id: "AA:BB:CC:DD"  # masqué : remplacer par le NetworkID de l'installation
   tx: ack
   dry_run: true
   association: 0xE3
