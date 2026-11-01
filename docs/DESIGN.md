@@ -620,6 +620,22 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   mais une rafale envoyée aussitôt après (12:33:53) n'a abouti qu'au créneau `:x4:37` (12:34:31) : le satellite n'écoute pas les
   relais à ce moment-là, ou pas assez longtemps.
 
+### 10.27 Trames du satellite, réglages locaux, poussées de la chaudière (01/11/2026 12:40 – 13:05)
+
+- **Trames du satellite reçues** (depuis son déplacement le 31/10, ≈ −100 dBm) : échange régulier `:x0:06` (`A0 29 x15` /
+  `A0 2F x4` : ambiante, consigne, `00`, mode, `00C6`), et échanges courts « ambiante seule » (`A02F x1`) quand il est éveillé.
+  `build_satellite_consigne` reproduit l'échange réel octet pour octet (test hôte).
+- **Réglages locaux** (utilisateur, 12:46 – 12:49) : Auto (relais `05/21` en 20 s) ; `+` puis `−` = consigne confort du bloc
+  19,0 → 19,5 → 19,0 (relais en ≈ 3 s chacun, pas de dérogation) ; programme lundi 07:30 (relais en 3 s) ; retour Hors gel (`08/10`,
+  relais 12:49:15). HA suit chaque relais. Programme d'origine remis depuis HA (vérifié 13:04:32).
+- **Satellite dans la main** (12:49 – 12:54) : ambiante 18,7 → 19,6 °C en 20 s tant qu'il est éveillé (échanges courts), puis plus
+  rien avant l'échange régulier de 12:50:05 (20,8 °C) : hors réveil, l'ambiante n'arrive que toutes les 10 min.
+- **Poussée `10` de la chaudière** (changement ECS au panneau, 12:42) : `7E 80 D5 <id> 05 10 A0 F0 00 0D <26 octets>`, mode ECS
+  dans le dernier mot (`A0FC`), répétée 4 fois sans accusé. `0.7.19` : accusé `80 7E D5 <id> 85 10 A0 F0 00 0D` (classe
+  `kPushAck` de la porte, envoyé avant toute autre émission, même dans la fenêtre réservée) et mise à jour immédiate du mode ECS.
+  Vérifié 13:03 (Max puis Eco Horaires) : une seule poussée par changement, accusée en 10 ms, mode ECS dans HA en 0,1 s.
+  Tests hôte : 872 vérifications.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;

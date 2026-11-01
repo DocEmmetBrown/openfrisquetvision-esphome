@@ -416,8 +416,20 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 | Satellite zone z | lit `A029 x15`, écrit `A02F + 5 × (z − 1)` : 1 mot (ambiante) ou 4 mots (ambiante, consigne, mode) [MQTT] ; écrit son bloc de zone (`A154`) lors d'un réglage local [vérifié] | toutes les 10 min, Z1 à `:x0`, Z2 à `:x1`, Z3 à `:x2` [MQTT] |
 | Sonde extérieure (`20`) | lit `9C54 x4` (date), écrit `A029 x1` (température extérieure) [MQTT] | toutes les 10 min à `:x4` [MQTT] |
 
-**Les trames émises par le satellite de référence n'ont jamais été reçues** par la carte (même bande élargie), seulement leurs effets
-(relais et réponses de la chaudière). Cause inconnue [à tester : satellite posé à côté de la carte].
+**Trames du satellite [vérifié le 01/11/2026]** : reçues depuis que le satellite a été déplacé (31/10, ≈ −100 dBm ; jamais reçues
+avant). Échange régulier toutes les 10 min à `:x0:05`/`:x0:06` :
+
+```
+80 08 FA <id> 01 17 A0 29 00 15 A0 2F 00 04 08 <ambiante:2> <consigne:2> 00 <mode> 00 C6     (23 octets, 4 mots)
+80 08 FA <id> 01 17 A0 29 00 15 A0 2F 00 01 02 <ambiante:2>                                  (17 octets, ambiante seule)
+```
+
+- `mode` = octet d'options du bloc (`21` Auto confort, `10` hors gel) ; consigne en dixièmes (`00BE` = 19,0, `0050` = 8,0).
+- Satellite **réveillé** (bouton, réglage local, prise en main) : échanges courts « ambiante seule » toutes les 1 à 10 s pendant
+  ~30 s, puis retour au rythme de 10 min. L'ambiante n'est donc mise à jour qu'à ce rythme hors réveil.
+- `+` / `−` en Auto modifient la **consigne confort du bloc** (relais `08 → 80`, mode `05`, options `21`, en ≈ 3 s), pas une
+  dérogation. Une modification de programme est relayée de même (≈ 3 s).
+- La nuit (≈ 01:05) : lectures `791A`, `7932`, `794A` x18 par le satellite.
 
 **Consigne directe [vérifié le 31/10/2026]** : un Connect peut faire lui-même l'échange du satellite, **en son nom** (source `08`,
 association du satellite, ici `FA`) :
@@ -477,8 +489,10 @@ observations faites sur d'autres installations, non vérifiées ici (**[bridge]*
   type **`10` (MEMORY_PUSH)** (`adresse:2 | taille:2 | données`, comme une réponse de lecture ; vu pour `A0F0`) ou **`45`
   (BOILER_EVENT)** (21 octets `type | étiquette:3 | horodatage:4 | 13 octets`, étiquette `0A <appareil> <paramètre>`, émis 3 fois ;
   vu au changement de la température maximale). Le Connect officiel les accuse : adresses permutées, même id, **réception `85`**,
-  même type, données vides (ou `adresse + taille` pour `10`). **Jamais observées ici** : nous ne les accusons pas encore ; à tester
-  en changeant un réglage sur le panneau.
+  même type, données vides (ou `adresse + taille` pour `10`). **`10` vérifié ici le 01/11/2026** : changement du mode ECS au
+  panneau → `7E 80 D5 <id> 05 10 A0 F0 00 0D 1A <26 octets>` (zéros, `AE80 66D3` en `A0F8`, **mode ECS en `A0FC`**, dernier mot :
+  `0080` Max, `0090` Eco Horaires). Sans accusé, répété 4 fois à 1 s (nouvel id) puis abandonné ; avec l'accusé
+  `80 7E D5 <id> 85 10 A0 F0 00 0D` (même id, envoyé en 10 ms), une seule émission. `45` jamais observé.
 - Autres types : `43` (SONDE_INIT, avant les envois de la sonde, données `00 00`), `44` (émis par le Connect, données `0100`/`0200`,
   sens inconnu). Chaudière à l'adresse **`84`** sur certaines installations (alors adresses mémoire `+ 0xC8`).
 - `79E0` (bloc « capteurs » complet) : en plus de ce qui figure en 7.1, **puissance ECS / chauffage** (mots 7 et 8), **ECS
@@ -501,8 +515,8 @@ observations faites sur d'autres installations, non vérifiées ici (**[bridge]*
 
 ## 13. Inconnu ou non vérifié
 
-- Poussées `10` / `45` de la chaudière (section 12) : jamais observées ici ; faut-il les accuser pour éviter une anomalie ?
-- Trames émises par les satellites et la sonde (formats [MQTT] seulement).
+- Poussée `45` (BOILER_EVENT) : jamais observée ici ; poussées `10` d'autres adresses que `A0F0`.
+- Trames de la sonde extérieure et des satellites Z2/Z3 (formats [MQTT] seulement).
 - Zones 2 et 3, boost, chaudières d'une autre famille (`+ 0xC8`).
 - Octet 5 du bloc de zone, octets inconnus de la page `A029`, paramètres `793E – 7956`, identifiant `AE80 66D3`.
 - Détection du brûleur en chauffage plus rapide qu'un instantané de fumées toutes les 5 minutes.

@@ -1,20 +1,20 @@
-# Resuming work (state at 01/11/2026 12:40)
+# Resuming work (state at 01/11/2026 13:05)
 
 Everything needed to pick the project up again. Detailed history and measurements live in [DESIGN.md](DESIGN.md) §10
-(windows 10.1 → 10.26); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
+(windows 10.1 → 10.27); the radio protocol: **[PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md)** (standalone reference) and [PROTOCOL.md](PROTOCOL.md) (discovery log).
 
 ## 1. Where things stand
 
 | Item | State |
 |---|---|
-| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.18-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
+| Board (Heltec V4.3, `10.35.5.18`) | **ESPHome `0.7.19-phase-2d-associate`** (`dev/phase-2d-associate.yaml`): **it is the boiler's Connect** since 28/10 22:29 |
 | Boiler | zone 1 **Hors gel** (8,0 °C), original programme, consignes **19,0** (set by the user on the satellite, 31/10 12:22) / 17,0 / 8,0 ; ECS **Eco Horaires** (state the user wants to keep) |
-| Zone block on the board | confirmed (relearned 01/11 12:25) |
+| Zone block on the board | confirmed (13:00); original programme rewritten from HA and verified 01/11 13:04 |
 | Pairing | Learned and saved in flash: NetworkID `05:D9:8D:C9` (same as YAML), **association `D5`** (YAML still says `E3`) |
 | MQTT firmware | **No longer paired** (still `E3`): it must be re-associated before it can be the Connect again (see §2) |
 | Unattended running | `api: reboot_timeout: 0s`, so no reboot without an API client; emergency stop restored OFF; `explore: true` (exploratory reads only when requested); `satellite_override: true` + `satellite_association: 0xFA` (direct consigne with zone 1 writes) |
 | Git | branch `main`, **nothing pushed** |
-| Host tests | `tests/host/run.sh` → 853 checks, 0 failures |
+| Host tests | `tests/host/run.sh` → 872 checks, 0 failures |
 
 Roadmap (DESIGN §10):
 
@@ -32,20 +32,19 @@ Roadmap (DESIGN §10):
    demand (state bit `0x08`; snapshots `79E6` at `:x3` and `7A02` at `:x8`), otherwise the slope of the live heating-body
    temperature `A05E` (hot water, 30-45 s lag). Possible follow-ups: ignore the slope ~2 min after a heating demand ends; set
    `explore: false` once mapping is no longer needed.
-   Other open points: the satellite's own frames are never received, even at 467 kHz RX bandwidth (test below); the RSSI of
-   short frames is meaningless (read it per packet).
+   Other open points: the RSSI of short frames is meaningless (read it per packet). The satellite's own frames **are received**
+   since it was moved on 31/10 (≈ −100 dBm; DESIGN 10.27).
    Tools: `dev/ofv_frames.py` (frame inventory), `dev/ofv_scan.py --split` + `dev/ofv_memmap.py` (memory map),
    `dev/ofv_setpoints.sh` (chained zone writes, each verified), `dev/ofv_api.py get|set|select|text|press`.
-2. **Satellite tests with the user (planned, not done yet)**: the satellite runs on batteries and can be moved, no special functions.
-   Start a capture (`esphome logs … > build/logs/frisq-sat.log`), then:
-   - **Range**: bring the satellite next to the board and change a setting on it (it triggers an exchange at once). Look for
-     `08 -> 80` frames with `python3 dev/ofv_frames.py build/logs/frisq-sat.log`. Received → it was range; decode what it writes
-     at `A02F` (ambient, setpoint, mode). Still nothing → different bit rate / modulation / sync word.
-   - **Local changes**: +/− setpoint in Auto, derogation if the satellite offers one (and its end at the next transition),
-     programme edit on the satellite. Each: relay `08`, broadcast byte, HA entities; then back to Hors gel / original programme.
-   - **Ambient**: warm the satellite in a hand; read `A029` every minute (already scheduled from :03 to :09) to see when the
-     ambient is updated (only at :x0:08, or on change).
-   - **Satellite absent** (optional): batteries out 20–30 min; boiler reaction, `A029`, anomaly bit; check recovery.
+2. **Satellite tests with the user: done 01/11** (DESIGN 10.27): satellite frames received; +/− in Auto change the comfort
+   setpoint of the block (no derogation); programme edits relayed in ~3 s; ambient only every 10 min unless the satellite is awake.
+   Remaining user-chosen tests (autonomous, log `build/logs/frisq-1101-tests.log`):
+   - **6**: dual path on a mode change (Hors gel → Confort → Hors gel, heating starts), a derogation, a programme change in Auto.
+   - **7**: direct consigne requested inside the quiet window (0.7.18 behaviour).
+   - **8**: read `79E0 x1C` and compare with the frisquet-bridge layout (instantaneous DHW at `79EC`, power words 7/8).
+   - **9**: burner sensor over heating cycles (`dev/ofv_burner.py`).
+   - Optional: satellite absent (batteries out 20–30 min).
+   Always finish in Hors gel, ECS Eco Horaires, original programme, consignes 19,0 / 17,0 / 8,0.
 3. **Decide which firmware stays the Connect**:
    - ESPHome: change the YAMLs' `association:` to `0xD5` so a « oublier le réseau appris » does not fall back to `E3`
      (which the boiler no longer accepts); remove the old MQTT devices from Home Assistant.
@@ -76,9 +75,8 @@ Roadmap (DESIGN §10):
      for a proper thermostat card, and use **`homeassistant` sensors** as inputs for phase 3 (outdoor temperature, ambient).
    - **Protocol reference**: done, [PROTOCOL-REFERENCE.md](PROTOCOL-REFERENCE.md) (standalone, to reimplement without this code).
    - **From frisquet-bridge** (markkvdb, MIT, same Visio protocol; PROTOCOL-REFERENCE §12):
-     - **Boiler pushes** `10`/`45` (reception `05`) when a setting is changed **on the boiler panel**, acknowledged by the
-       official Connect (reception `85`). Never seen here; we do not acknowledge them. Test: change a setting on the panel
-       during a capture; if they come (and repeat), add their acknowledgement to the engine and the gate.
+     - **Boiler pushes**: type `10` seen here (ECS change on the panel, `A0F0 x0D`, ECS mode at `A0FC`); acknowledged since
+       0.7.19 (reception `85`), verified on air 01/11 13:03 (no more repeats, HA ECS mode follows at once). `45` never seen.
      - Tip for users: pressing the satellite's **info button** wakes it and makes a pending zone write land at once.
      - `79E0` sensor block has more fields (DHW and heating power, **instantaneous DHW** at `79EC`, zone values).
      - Control modes worth considering for phase 3: **virtual/simple satellite** (own zone 1 via the `A02F` consigne, ambient

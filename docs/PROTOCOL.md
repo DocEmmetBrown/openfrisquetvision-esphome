@@ -131,11 +131,12 @@ Une lecture est **refusée en entier** dès qu'un de ses mots est invalide (rép
 | `A029 – A09B` | `A029` : **état en direct** (extérieure, date, état, zones ; voir la diffusion) ; `A041` : copie décalée ; **`A05E` = température du corps de chauffe en direct** (dixièmes de °C ; suit la flamme avec ~30 s d'inertie, voir DESIGN 10.23) ; `A063 – A09A` consommations annuelles (nulles) |
 | `A0F0 – A104` | `A0F8` identifiant `AE80 66D3` ; `A0FC` **mode ECS** |
 
-## Échanges des autres appareils (d'après le firmware MQTT, non captés ici)
+## Échanges des autres appareils (satellite capté depuis le 31/10/2026, sonde d'après le firmware MQTT)
 
 Un échange `0x17` lit une plage et en écrit une autre : `<lu : adresse, taille> <écrit : adresse, taille> <données>`.
 - **Satellite** zone N : lit `A029 x15` (la « diffusion » est sa réponse), écrit `A02F + 5 × (N − 1)` : 1 mot (ambiante) ou 4 mots
-  (ambiante, consigne, mode).
+  (ambiante, consigne, `00` + mode, `00C6`). Capté le 01/11 : `80 08 FA <id> 01 17 A0 29 00 15 A0 2F 00 04 08 00 BE 00 BE 00 21 00 C6`
+  à `:x0:06`, échanges « ambiante seule » quand il est éveillé (voir DESIGN 10.27).
 - **Sonde extérieure** (`0x20`, association propre, à faire sur la chaudière) : toutes les 10 min à `:x4`, lit `9C54 x4` (date) et
   écrit `A029 x1` (température extérieure ; `050A` = absente).
 
@@ -169,8 +170,8 @@ chaudière affiche alors OK et répond aux lectures avec la nouvelle association
 ## Inventaire des trames de la chaudière (capture du 29/10/2026 16:13 – 16:45, `dev/ofv_frames.py`)
 
 Toutes les trames reçues pendant une séance où le Connect a changé le mode ECS (aller-retour) et le mode de zone 1
-(Hors gel → Auto → Confort → Réduit → Hors gel). Les trames du **satellite vers la chaudière ne sont jamais reçues** par la carte
-(pas même rejetées : une seule trame rejetée en plusieurs heures) ; on n'en voit que les effets.
+(Hors gel → Auto → Confort → Réduit → Hors gel). Les trames du **satellite vers la chaudière n'étaient pas reçues** par la carte
+à cette date (portée : reçues depuis que le satellite a été déplacé le 31/10, à ≈ −100 dBm) ; on n'en voyait que les effets.
 
 | Trame (chaudière →) | Réc. | Longueur | Quand | Rôle |
 |---|---|---|---|---|
