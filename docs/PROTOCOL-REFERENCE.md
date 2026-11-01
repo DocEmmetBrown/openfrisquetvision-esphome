@@ -350,10 +350,12 @@ C'est la page commune lue par les satellites (leur « diffusion »), où chaque 
 | 4 – 9 | `A02B – A02D` | date BCD `AA MM JJ hh mm ss` |
 | 10 | `A02E` (fort) | **état chaudière** : bit 0 anomalie, bit 2 chauffage arrêté, bit 3 demande de chauffage (`28`) / veille (`20`) |
 | 11 | `A02E` (faible) | jour de la semaine, 0 = dimanche |
-| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), inconnu (1), **mode diffusé** (1), puis 2 mots [hypothèse : départ et consigne de départ] |
+| 12 + 10 × (z − 1) | `A02F + 5 × (z − 1)` | **zone z** : ambiante (2), consigne active (2), **demande** (1 : `0x40` = le satellite demande du chauffage), **mode diffusé** (1), puis 2 mots [hypothèse : départ et consigne de départ] |
 
-Le bit 3 de l'état semble suivre la **demande de chauffage des zones**, pas la flamme : une flamme d'eau chaude le laisse à `20`
-[hypothèse forte : vu `28` zone en Confort brûleur allumé, `20` pendant les puisages].
+Le bit 3 de l'état suit la **demande de chauffage des zones**, pas la flamme : une flamme d'eau chaude le laisse à `20`.
+**C'est le satellite qui décide de chauffer** [vérifié le 01/11] : la chaudière passe à `28` à l'échange où le satellite écrit
+`0x40` dans l'octet de demande (consigne 19,0, ambiante 16,8), et reste à `20` tant qu'il écrit `00`, même avec une consigne
+au-dessus de l'ambiante. Une consigne écrite avec `00` **coupe aussitôt** une demande en cours (`28` → `20` en moins d'une seconde).
 
 **Mode diffusé** (octet d'options normalisé par le satellite ; bit `0x04` à ignorer) **[vérifié le 29/10]** :
 

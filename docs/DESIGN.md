@@ -636,6 +636,26 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   Vérifié 13:03 (Max puis Eco Horaires) : une seule poussée par changement, accusée en 10 ms, mode ECS dans HA en 0,1 s.
   Tests hôte : 872 vérifications.
 
+### 10.28 Eau chaude, Confort réel, demande du satellite (01/11/2026 13:05 – 13:37)
+
+- **`79E0 x1C`** : `79EC = 0x0320` (80,0) constant, c'est une consigne, pas l'eau chaude instantanée ; mots de puissance à 0.
+  Puisage 13:08 – 13:11 (flamme 13:09:55 – 13:11:25) manqué : il tombait dans la fenêtre réservée, sans lecture `A05E`.
+  `0.7.20` : les lectures `A05E` se font aussi dans la fenêtre réservée, sauf près de `:x0` (`near_zone1_exchange`) ;
+  878 vérifications. Lectures `A05E` vues dans la fenêtre à 13:19:36.
+- **Recherche externe vérifiée** : `7A16–7A17` = horloge chaudière (Unix, mot faible d'abord) ; `7A30` = `0308 2700 FF7E FFFF`
+  (version du satellite, Connect sans version) ; `7531–7544` vides ; `7931` = 1901.
+- **Confort depuis HA** (13:20:42) : consigne directe envoyée aussitôt dans la fenêtre réservée, la chaudière affiche Confort 19,0
+  mais **reste en veille (`20`)**. Bloc pris par le satellite à **13:29:14** (créneau `:x9:14`, pas seulement `:x4:37`).
+  À 13:30:05 le satellite écrit `00BE 40 01` : **octet `0x40` = demande de chauffage**, la chaudière passe à `28`. Notre
+  consigne directe écrit `00` (aucune demande) et le mode `05` alors que le satellite écrit `01` en Confort.
+- **Brûleur** (test 9) : corps de chauffe 83 → 41 °C (pompe) puis remontée dès 13:31:30 ; `Chaudière brûleur` ON à 13:33:11.
+- **Retour Hors gel** (13:33:35) : la consigne directe (`00`) coupe la demande immédiatement (« Arrêt » au panneau). Bloc
+  manqué au créneau `:x4:37`, pris à **13:37:07**, 7 s après un appui sur « i » (réveil par le bouton efficace cette fois).
+- **Conséquence** : la consigne directe peut **arrêter** le chauffage tout de suite, mais pas le **démarrer** : il faut la
+  demande `0x40`, que seul le satellite calcule. Options à décider : envoyer `0x40` nous-mêmes quand ambiante < consigne
+  (le satellite corrige au plus 10 min après), ou ne compter que sur le bloc. Corriger le mode Confort direct (`01`, pas `05`).
+- État final vérifié 13:37 : Hors gel 8,0, état `20`, ECS Eco Horaires, consignes 19 / 17 / 8, programme d'origine.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
