@@ -30,6 +30,7 @@ struct EngineStats {
   uint32_t zone_writes_failed = 0;
   uint32_t pushes = 0;  // boiler pushes (panel changes), each acknowledged
   uint32_t consignes_sent = 0;  // direct consigne exchanges in the satellite name
+  uint32_t direct_skipped = 0;  // direct path not used: the real satellite has gone quiet
 };
 
 // Life of a hot-water mode write: queued, sent until the boiler acknowledges, then read back.
@@ -258,6 +259,10 @@ class ConnectEngine {
                          now_ms - consigne_ms_ < 30000;
         page_ms_ = now_ms;
         page_seconds_ = clock_.seconds(now_ms);
+        if (broadcast && !last_page_own_) {
+          satellite_seen_ = true;
+          satellite_ms_ = now_ms;
+        }
         // The satellite's own exchange (not the answer to ours) may have put its old consigne back.
         if (broadcast && direct_active_ && !last_page_own_) {
           direct_wanted_ = true;
@@ -390,6 +395,14 @@ class ConnectEngine {
       direct_active_ = false;  // the satellite has the block (or the write ended): it sends the right consigne itself
       direct_wanted_ = false;
     }
+    // Never speak for a satellite that has gone quiet: after ~20 min without its frames the boiler stops heating
+    // (fail-safe, EXTERNAL-RESEARCH), and our frames must not hide that. The normal zone write still goes.
+    if (!satellite_alive(now_ms) && (direct_wanted_ || sat_block_wanted_ || direct_repeat_ms_ != 0)) {
+      direct_wanted_ = false;
+      sat_block_wanted_ = false;
+      direct_repeat_ms_ = 0;
+      ++stats_.direct_skipped;
+    }
     if (direct_wanted_ && !consigne_pending_) {
       direct_wanted_ = false;
       uint8_t data[8];
@@ -509,6 +522,11 @@ class ConnectEngine {
     return true;
   }
   bool direct_active() const { return direct_active_; }
+  // The real zone 1 satellite was heard (an exchange of its own) within kSatelliteSilenceMs.
+  bool satellite_alive(uint32_t now_ms) const {
+    return satellite_seen_ && now_ms - satellite_ms_ < kSatelliteSilenceMs;
+  }
+  static constexpr uint32_t kSatelliteSilenceMs = 25UL * 60UL * 1000UL;
 
   // The zone 1 satellite's block write-back in its name: the known block with another mode, options as in
   // request_zone_mode. The boiler then acts on it at once, as when the satellite itself has accepted a block
@@ -796,6 +814,8 @@ class ConnectEngine {
   uint32_t sat_block_ms_ = 0;
   bool sat_block_pending_ = false;
   bool sat_block_wanted_ = false;
+  bool satellite_seen_ = false;
+  uint32_t satellite_ms_ = 0;
   static constexpr uint32_t kDirectRepeatMs = 35000;
   static constexpr uint8_t kDirectRepeats = 2;
   uint8_t direct_repeats_left_ = 0;

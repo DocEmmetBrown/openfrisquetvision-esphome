@@ -115,6 +115,7 @@ class FrisquetRadio : public Component {
     network_id_[0] = a; network_id_[1] = b; network_id_[2] = c; network_id_[3] = d;
   }
   void set_rx_bandwidth(float value) { rx_bandwidth_ = value; }
+  void set_rx_boosted_gain(bool value) { rx_boosted_gain_ = value; }
   void set_lna_bypass(bool value) { lna_bypass_ = value; }
   void set_sensor(uint8_t id, sensor::Sensor *s) { if (id < kSensorCount) sensors_[id] = s; }
   void set_text_sensor(uint8_t id, text_sensor::TextSensor *s) { if (id < kTextCount) texts_[id] = s; }
@@ -226,6 +227,8 @@ class FrisquetRadio : public Component {
   int last_pairing_state_{-1};
   ESPPreferenceObject network_pref_;
   float rx_bandwidth_{234.3f};
+  bool rx_boosted_gain_{false};
+  int16_t rx_boosted_result_{1};  // 1: not asked, else the RadioLib status
   bool lna_bypass_{false};
   uint8_t tx_level_{0};
   bool dry_run_{true};
@@ -277,6 +280,7 @@ class FrisquetRadio : public Component {
 #endif
   static constexpr uint32_t kBoostMaxMs = 6UL * 3600UL * 1000UL;  // Frisquet: at most 6 h
   int last_boost_{-1};
+  int last_satellite_alive_{-1};
   uint32_t boost_since_ms_{0};
   bool boost_stop_sent_{false};
 

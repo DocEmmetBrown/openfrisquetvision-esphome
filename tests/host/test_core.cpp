@@ -1919,6 +1919,33 @@ static void test_burner() {
     CHECK(!e.reading());
   }
 
+  // Satellite silence guard: nothing in the satellite's name unless it was heard within 25 min.
+  {
+    const Bytes &known = F["payload_zone_relay_live"];
+    TxPolicy gp = engine_policy(TxLevel::kWrite, false);
+    gp.zone_write_mask = kZoneFieldSetpoints | kZoneFieldMode | kZoneFieldProgram;
+    gp.satellite_override = true;
+    gp.satellite_association = 0xFA;
+    ConnectEngine g;
+    g.set_policy(gp);
+    g.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x22, 0x14, 0x30);
+    ReadResult result;
+    g.on_frame(100, known.data(), known.size(), result);
+    TxRequest tx;
+    g.poll(110, tx);
+    CHECK(!g.satellite_alive(200));
+    CHECK(g.request_zone_mode(0, 0x08));
+    bool direct = false, write = false;
+    for (uint32_t t = 200; t < 5000; t += 100) {
+      if (!g.poll(t, tx)) continue;
+      if (tx.kind == TxClass::kSatelliteBlock || tx.kind == TxClass::kSatelliteConsigne) direct = true;
+      if (tx.kind == TxClass::kZoneWrite) write = true;
+    }
+    CHECK(!direct && write && g.stats().direct_skipped == 1);
+    Bytes page = F["payload_sat_broadcast_reduced"];
+    g.on_frame(6000, page.data(), page.size(), result);
+    CHECK(g.satellite_alive(6000) && g.satellite_alive(6000 + 25 * 60000 - 1) && !g.satellite_alive(6000 + 25 * 60000));
+  }
   // Boost: comfort +1.0 and options 0x40, from Confort only; off takes it back.
   {
     const Bytes &known = F["payload_zone_relay_live"];  // Auto (05/21): comfort period

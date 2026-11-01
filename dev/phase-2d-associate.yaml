@@ -6,7 +6,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.28-phase-2d-associate"
+    version: "0.7.29-phase-2d-associate"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -107,6 +107,7 @@ frisquet:
   tx_blocked:
     name: Radio trames bloquées
   rx_bandwidth: 234.3
+  rx_boosted_gain: true
   lna_bypass: false
   zone1_ambient_temperature:
     name: Zone 1 température ambiante

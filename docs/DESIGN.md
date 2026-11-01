@@ -109,6 +109,7 @@ frisquet:
     chip: sx1262            # sx1262 | sx1276
     board: heltec_v4_3      # pins + FEM KCT8103L préconfigurés
     rx_bandwidth: 234.3kHz
+    rx_boosted_gain: false  # gain de réception renforcé du SX1262 (≈ +3 dB), pour les trames faibles des satellites
     lna_bypass: false       # V4.3 : false = LNA actif
   network_id: "AA:BB:CC:DD" # ou « auto » via le bouton de récupération
   connect: active           # none | active | passive
@@ -713,6 +714,20 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   La carte coupe le boost après 6 h (compté depuis le redémarrage s'il était déjà actif). Refusé hors confort (vérifié).
 - Pendant le boost, « Zone 1 consigne confort » affiche la consigne relevée (20,0) : c'est le bloc réel.
 - État final vérifié : Hors gel 8,0, état `20`, ECS Eco Horaires, consignes 19 / 17 / 8, programme d'origine.
+
+### 10.31 Gain de réception renforcé, garde-fou de silence du satellite (01/11/2026 16:25, `0.7.29`)
+
+- Option YAML `rx_boosted_gain` (défaut `false`, `true` sur la carte) : `setRxBoostedGainMode(true)` du SX1262 (registre
+  `0x08AC = 0x96`, ≈ +3 dB). Le résumé de configuration affiche `RX boosted gain: on`. Référence avant (12:25 – 16:20) : sur
+  ≈ 24 échanges réguliers du satellite, 19 entendus dont **15 valides**, et 8 trames du satellite au CRC invalide sur la
+  journée. À mesurer après plusieurs heures.
+- Préambule d'émission de 5 octets (piste de la recherche externe) : pas fait. Nos trames vont toutes à la chaudière, qui
+  écoute en permanence ; le préambule ne servirait qu'à parler directement à un satellite.
+- **Garde-fou** : rien n'est envoyé automatiquement au nom du satellite (bloc, consigne, renvois) si son propre échange
+  n'a pas été entendu depuis 25 min (`satellite_alive`). Sans ses trames pendant ≈ 20 min, la chaudière se met en défaut et
+  coupe le chauffage : nos trames ne doivent pas masquer une panne du satellite (pile). L'écriture de zone normale part
+  quand même. Compteur `direct_skipped`, et un avertissement dans les logs quand le satellite se tait. Les commandes
+  manuelles `SAT` / `SATZ` restent possibles. 924 vérifications.
 
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 

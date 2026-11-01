@@ -229,6 +229,13 @@ void FrisquetRadio::sync_zone_() {
     }
 #endif
   }
+  const int alive = this->engine_.satellite_alive(millis()) ? 1 : 0;
+  if (alive != this->last_satellite_alive_) {
+    if (alive) ESP_LOGI(TAG, "Zone 1 satellite heard: changes also go to the boiler directly, in its name");
+    else if (this->last_satellite_alive_ == 1)
+      ESP_LOGW(TAG, "Zone 1 satellite silent for 25 min: nothing more in its name until it is heard again");
+    this->last_satellite_alive_ = alive;
+  }
   if (!this->engine_.zone_block_known(0)) return;
   const uint8_t *block = this->engine_.zone_block(0);
   const int boost = block_confirmed && (block[4] & 0x40) ? 1 : 0;
@@ -564,6 +571,12 @@ void FrisquetRadio::setup() {
   state = this->radio_->setRxBandwidth(this->rx_bandwidth_);
   if (state != RADIOLIB_ERR_NONE) ESP_LOGW(TAG, "setRxBandwidth(%.1f) failed: %d", this->rx_bandwidth_, state);
   this->radio_->setPreambleLength(16);
+  if (this->rx_boosted_gain_) {
+    state = this->radio_->setRxBoostedGainMode(true);
+    this->rx_boosted_result_ = state;
+    if (state != RADIOLIB_ERR_NONE) ESP_LOGW(TAG, "setRxBoostedGainMode failed: %d", state);
+    else ESP_LOGI(TAG, "SX1262 boosted receive gain on");
+  }
   memcpy(this->active_network_, this->network_id_, 4);
   this->network_pref_ = global_preferences->make_preference<NetworkStoreBlob>(fnv1_hash("frisquet_network"));
   {
@@ -1015,6 +1028,8 @@ void FrisquetRadio::dump_config() {
   if (this->network_learned_) ESP_LOGCONFIG(TAG, "  YAML network ID: %s", format_network(this->network_id_).c_str());
   ESP_LOGCONFIG(TAG, "  Association confirmations: %s", this->pairing_allowed_ ? "allowed" : "refused");
   ESP_LOGCONFIG(TAG, "  RX bandwidth: %.1f kHz", this->rx_bandwidth_);
+  if (this->rx_boosted_result_ == 1) ESP_LOGCONFIG(TAG, "  RX boosted gain: off");
+  else ESP_LOGCONFIG(TAG, "  RX boosted gain: %s", this->rx_boosted_result_ == RADIOLIB_ERR_NONE ? "on" : "FAILED");
   if (this->fem_) ESP_LOGCONFIG(TAG, "  KCT8103L FEM: LNA bypass %s", this->lna_bypass_ ? "on" : "off");
 #ifdef FRISQUET_TX_ENABLED
   ESP_LOGCONFIG(TAG, "  Transmit: %s, association 0x%02X, %s",

@@ -30,6 +30,7 @@ CONF_ASSOCIATION = "association"
 CONF_NETWORK_ID = "network_id"
 CONF_BOARD = "board"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
+CONF_RX_BOOSTED_GAIN = "rx_boosted_gain"
 CONF_LNA_BYPASS = "lna_bypass"
 CONF_PAIRING = "pairing"
 CONF_EXPLORE = "explore"
@@ -196,6 +197,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_DRY_RUN, default=True): cv.boolean,
         cv.Optional(CONF_ASSOCIATION): cv.hex_uint8_t,
         cv.Optional(CONF_RX_BANDWIDTH, default=234.3): cv.one_of(*RX_BANDWIDTHS, float=True),
+        # SX1262 boosted receive gain (about +3 dB, a little more current): for the satellites' weak frames.
+        cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
         cv.Optional(CONF_LNA_BYPASS, default=False): cv.boolean,
         # Allows the association button to transmit its confirmation (it changes the NetworkID and the
         # association byte). NetworkID recovery only listens and is always available.
@@ -238,6 +241,7 @@ async def to_code(config):
     octets = config[CONF_NETWORK_ID]
     cg.add(var.set_network_id(octets[0], octets[1], octets[2], octets[3]))
     cg.add(var.set_rx_bandwidth(config[CONF_RX_BANDWIDTH]))
+    cg.add(var.set_rx_boosted_gain(config[CONF_RX_BOOSTED_GAIN]))
     cg.add(var.set_lna_bypass(config[CONF_LNA_BYPASS]))
 
     if config[CONF_TX] != "none":
