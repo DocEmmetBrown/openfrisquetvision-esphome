@@ -6,7 +6,7 @@ esphome:
   friendly_name: Frisquette
   project:
     name: openfrisquetvisio.esphome
-    version: "0.7.29-phase-2d-associate"
+    version: "0.7.31-phase-2d-associate"
   platformio_options:
     board_build.flash_mode: qio
     board_build.f_flash: 80000000L
@@ -98,6 +98,14 @@ frisquet:
     name: Radio association
   boiler_activity:
     name: Chaudière activité
+  panel_version:
+    name: Chaudière version panneau
+  paired_versions:
+    name: Chaudière appareils appairés
+  zone1_flow_min:
+    name: Zone 1 départ mini
+  zone1_flow_max:
+    name: Zone 1 départ maxi
   reads_ok:
     name: Radio lectures réussies
   reads_failed:
@@ -180,6 +188,10 @@ button:
   - platform: frisquet
     type: forget_network
     name: Radio oublier le réseau appris
+
+climate:
+  - platform: frisquet
+    name: Zone 1
 
 switch:
   - platform: frisquet

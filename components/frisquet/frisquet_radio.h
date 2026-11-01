@@ -76,6 +76,8 @@ enum SensorId : uint8_t {
   kTxDryRuns,
   kTxBlocked,
   kHeatingBodyLive,
+  kZone1FlowMin,
+  kZone1FlowMax,
   kSensorCount,
 };
 
@@ -93,6 +95,8 @@ enum TextId : uint8_t {
   kZoneBlockState,
   kNetwork,
   kPairingState,
+  kPanelVersion,
+  kPairedVersions,
   kTextCount,
 };
 
@@ -103,6 +107,8 @@ struct ZoneStoreBlob {
 struct NetworkStoreBlob {
   uint8_t data[::frisquet::kNetworkStoreSize];
 };
+
+class FrisquetClimate;
 
 // The transmit path (tx: read | ack) is compiled only when FRISQUET_TX_ENABLED is defined.
 class FrisquetRadio : public Component {
@@ -162,6 +168,13 @@ class FrisquetRadio : public Component {
   bool request_zone_program(const std::string &hex);
   // Zone 1 boost (comfort +1.0 C, options 0x40), stopped by us after kBoostMaxMs (the Connect owns it).
   bool request_zone_boost(bool on);
+  // Zone 1 thermostat: the setpoint of the active mode (comfort, reduced or frost; in Auto, the current period's).
+  bool request_zone_target(float celsius);
+  const uint8_t *zone1_block() const;  // the confirmed zone 1 block, or nullptr
+  float zone1_ambient() const { return zone1_ambient_; }
+  float zone1_setpoint() const { return zone1_setpoint_; }
+  bool heating_demand() const { return state_known_ && boiler_state_.running; }
+  void set_zone_climate(FrisquetClimate *c) { zone_climate_ = c; }
 #ifdef USE_SWITCH
   void set_boost_switch(switch_::Switch *s) { boost_switch_ = s; }
 #endif
@@ -280,6 +293,9 @@ class FrisquetRadio : public Component {
 #endif
   static constexpr uint32_t kBoostMaxMs = 6UL * 3600UL * 1000UL;  // Frisquet: at most 6 h
   int last_boost_{-1};
+  FrisquetClimate *zone_climate_{nullptr};
+  float zone1_ambient_{NAN};
+  float zone1_setpoint_{NAN};
   int last_satellite_alive_{-1};
   uint32_t boost_since_ms_{0};
   bool boost_stop_sent_{false};

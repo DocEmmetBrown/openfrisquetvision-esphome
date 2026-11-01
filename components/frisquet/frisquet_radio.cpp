@@ -1,4 +1,5 @@
 #include "frisquet_radio.h"
+#include "zone_climate.h"
 
 #include <SPI.h>
 
@@ -173,6 +174,25 @@ bool FrisquetRadio::request_zone_mode(const std::string &name) {
 
 bool FrisquetRadio::request_zone_boost(bool on) { return this->engine_.request_zone_boost(0, on); }
 
+const uint8_t *FrisquetRadio::zone1_block() const {
+  return this->engine_.zone_block_confirmed(0) ? this->engine_.zone_block(0) : nullptr;
+}
+
+bool FrisquetRadio::request_zone_target(float celsius) {
+  const uint8_t *block = this->zone1_block();
+  if (block == nullptr) return false;
+  uint8_t field = 0;
+  switch (block[3]) {
+    case 0x07: field = 1; break;
+    case 0x08: field = 2; break;
+    case 0x05: field = (block[4] & 0x01) ? 0 : 1; break;  // Auto: the current period (the satellite's comfort bit)
+    default: field = 0; break;
+  }
+  // In a boost the comfort setpoint carries the extra 1.0 C: set the base, the boost stays.
+  if (field == 0 && (block[4] & 0x40)) return false;
+  return this->request_zone_setpoint(field, celsius);
+}
+
 bool FrisquetRadio::request_zone_program(const std::string &hex) {
   uint8_t program[::frisquet::kProgramSize];
   if (!::frisquet::parse_program_hex(hex.c_str(), hex.size(), program)) return false;
@@ -305,6 +325,8 @@ bool FrisquetRadio::request_zone_setpoint(uint8_t, float) { return false; }
 void FrisquetRadio::republish_zone_block() {}
 bool FrisquetRadio::request_zone_mode(const std::string &) { return false; }
 bool FrisquetRadio::request_zone_boost(bool) { return false; }
+const uint8_t *FrisquetRadio::zone1_block() const { return nullptr; }
+bool FrisquetRadio::request_zone_target(float) { return false; }
 bool FrisquetRadio::request_zone_program(const std::string &) { return false; }
 #endif
 
@@ -652,6 +674,9 @@ void FrisquetRadio::loop() {
 #ifdef FRISQUET_TX_ENABLED
   this->tx_step_(millis());
 #endif
+#ifdef USE_CLIMATE
+  if (this->zone_climate_ != nullptr) this->zone_climate_->refresh();
+#endif
   if (this->frame_seen_ && millis() - this->last_age_publish_ms_ >= 30000) {
     const uint32_t current = millis();
     this->last_age_publish_ms_ = current;
@@ -903,6 +928,22 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
     case ::frisquet::ReadKind::kSatelliteConsigne:
       ESP_LOGI(TAG, "SAT consigne answered by the boiler: %s", format_hex_pretty(frame, length).c_str());
       break;
+    case ::frisquet::ReadKind::kPanel: {
+      ::frisquet::PanelDiag diag;
+      if (::frisquet::decode_panel_diag(frame, length, diag)) {
+        char text[12];
+        snprintf(text, sizeof(text), "V%X.%02X", diag.version >> 8, diag.version & 0xFF);
+        this->publish_text_(kPanelVersion, text);
+        this->publish_(kZone1FlowMin, diag.flow_min);
+        this->publish_(kZone1FlowMax, diag.flow_max);
+      }
+      break;
+    }
+    case ::frisquet::ReadKind::kPaired: {
+      char text[96];
+      if (::frisquet::format_paired_versions(frame, length, text, sizeof(text))) this->publish_text_(kPairedVersions, text);
+      break;
+    }
     case ::frisquet::ReadKind::kSatelliteBlock:
       ESP_LOGI(TAG, "SATZ block answered by the boiler: %s", format_hex_pretty(frame, length).c_str());
       break;
@@ -965,6 +1006,8 @@ static const char *zone_mode_name(::frisquet::ZoneMode mode) {
 void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroadcast &b) {
   this->publish_(kZone1Ambient, b.ambient[0]);
   this->publish_(kZone1Setpoint, b.setpoint[0]);
+  this->zone1_ambient_ = b.ambient[0];
+  this->zone1_setpoint_ = b.setpoint[0];
   this->publish_(kOutdoor, b.outdoor);
   this->publish_text_(kZone1Mode, zone_mode_name(::frisquet::decode_zone_mode(b.mode_raw[0]).mode));
 
@@ -995,6 +1038,8 @@ void FrisquetRadio::publish_satellite_broadcast_(const ::frisquet::SatelliteBroa
 void FrisquetRadio::publish_info_(const ::frisquet::BoilerInfo &info) {
   this->publish_(kZone1Ambient, info.ambient[0]);
   this->publish_(kZone1Setpoint, info.setpoint[0]);
+  this->zone1_ambient_ = info.ambient[0];
+  this->zone1_setpoint_ = info.setpoint[0];
   this->publish_(kHotWater, info.hot_water);
   this->publish_(kHeatingBody, info.heating_body);
   this->publish_(kOutdoor, info.outdoor);

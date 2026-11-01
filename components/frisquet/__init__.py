@@ -126,6 +126,19 @@ SENSORS = {
     "tx_blocked": _counter(),
     # Live heating-body temperature (0xA05E, read every 15 s outside the satellites' window).
     "heating_body_live": _temperature(),
+    # Diagnostics read every hour (0x7946): zone 1 flow temperature limits set on the boiler.
+    "zone1_flow_min": sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "zone1_flow_max": sensor.sensor_schema(
+        unit_of_measurement=UNIT_CELSIUS,
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_TEMPERATURE,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
 }
 
 # Same rule for the C++ TextId enum.
@@ -150,6 +163,9 @@ TEXT_SENSORS = {
     "network": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     # Last pairing session: listening, confirming, succeeded, failed, cancelled.
     "pairing_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    # Diagnostics read every hour: panel firmware (0x7931, "V19.01") and the paired devices' versions (0x7A30).
+    "panel_version": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    "paired_versions": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 

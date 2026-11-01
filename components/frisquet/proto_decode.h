@@ -404,4 +404,52 @@ inline void format_program_hex(const uint8_t *program, char *out) {
   out[kProgramSize * 2] = '\0';
 }
 
+// Diagnostics. Answer to a read of `words` words: 7E 80 <assoc> <id> 81 03 <2 * words> <data>.
+inline const uint8_t *read_answer_data(const uint8_t *frame, size_t length, uint16_t words) {
+  Header header;
+  if (!parse_header(frame, length, header)) return nullptr;
+  if (header.type != kRead || !header.is_ack() || header.source != kIdBoiler) return nullptr;
+  if (frame[6] != 2 * words || length != 7u + 2u * words) return nullptr;
+  return frame + 7;
+}
+
+struct PanelDiag {
+  uint16_t version = 0;  // BCD: 0x1901 = V19.01
+  uint8_t flow_min = 0;  // zone 1 flow limits, degrees (0x7946)
+  uint8_t flow_max = 0;
+};
+
+// 0x7931 x 0x16: panel version at 0x7931, zone 1 flow min / max at 0x7946 (20 / 60 on our boiler).
+inline bool decode_panel_diag(const uint8_t *frame, size_t length, PanelDiag &out) {
+  const uint8_t *data = read_answer_data(frame, length, 0x16);
+  if (!data) return false;
+  out.version = be16(data);
+  out.flow_min = data[2 * 0x15];
+  out.flow_max = data[2 * 0x15 + 1];
+  return out.flow_min <= out.flow_max;
+}
+
+// 0x7A30 x 4: two paired devices, each (index, id) then version (BCD, 0xFFFF = none recorded). Ours, 01/11/2026:
+// 0308 2700 FF7E FFFF = satellite 08 V27.00, Connect 7E without a version.
+inline bool format_paired_versions(const uint8_t *frame, size_t length, char *text, size_t capacity) {
+  const uint8_t *data = read_answer_data(frame, length, 4);
+  if (!data || !text || capacity < 64) return false;
+  size_t used = 0;
+  text[0] = 0;
+  for (int i = 0; i < 2; ++i) {
+    const uint8_t id = data[4 * i + 1];
+    const uint16_t version = be16(data + 4 * i + 2);
+    if (be16(data + 4 * i) == 0 || be16(data + 4 * i) == 0xFFFF) continue;
+    const char *name = id == kIdConnect ? "Connect" : (id >= kIdZone1 && id <= kIdZone3) ? "Satellite" : "Appareil";
+    char item[32];
+    if (version == 0xFFFF || version == 0)
+      snprintf(item, sizeof(item), "%s%s %02X sans version", used ? ", " : "", name, id);
+    else
+      snprintf(item, sizeof(item), "%s%s %02X V%X.%02X", used ? ", " : "", name, id, version >> 8, version & 0xFF);
+    used += snprintf(text + used, capacity - used, "%s", item);
+  }
+  if (used == 0) snprintf(text, capacity, "aucun");
+  return true;
+}
+
 }  // namespace frisquet

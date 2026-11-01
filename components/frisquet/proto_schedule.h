@@ -63,5 +63,7 @@ constexpr uint32_t kConsumptionPeriod = 3600;
 constexpr uint32_t kConsumptionOffset = 300;                  // :05 of each hour
 constexpr uint32_t kHotWaterModePeriod = 3600;
 constexpr uint32_t kHotWaterModeOffset = 420;                 // :07 of each hour
+constexpr uint32_t kDiagPeriod = 3600;
+constexpr uint32_t kDiagOffset = 390;                         // :06:30 of each hour
 
 }  // namespace frisquet

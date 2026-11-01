@@ -655,6 +655,7 @@ class ConnectEngine {
       for (SlotSchedule &slot : status_slots_) slot.reset();
       consumption_slot_.reset();
       hot_water_slot_.reset();
+      diag_slot_.reset();
     }
     const uint32_t seconds = clock_.seconds(now_ms);
     for (size_t i = 0; i < kTemperatureSlots; ++i)
@@ -671,6 +672,11 @@ class ConnectEngine {
     }
     if (hot_water_slot_.due(seconds, now_ms, kHotWaterModePeriod, kHotWaterModeOffset))
       enqueue_(ReadKind::kHotWaterMode);
+    // Diagnostics (versions, flow limits): every hour.
+    if (diag_slot_.due(seconds, now_ms, kDiagPeriod, kDiagOffset)) {
+      enqueue_(ReadKind::kPanel);
+      enqueue_(ReadKind::kPaired);
+    }
     // The live heating-body temperature (burner detection): a 0.15 s read, so also in the satellites' window, except
     // around the zone 1 satellite's own exchange (a hot-water burn there lasts 1-2 minutes and was missed before 0.7.20).
     if (policy_.live_body_reads && !near_zone1_exchange(seconds) &&
@@ -771,6 +777,8 @@ class ConnectEngine {
       case ReadKind::kExplore: address = explore_address_; words = explore_words_; break;
       case ReadKind::kBody: address = kAddrBodyLive; words = 0x01; break;
       case ReadKind::kFlue: address = kAddrFlueSnapshot; words = 0x01; break;
+      case ReadKind::kPanel: address = kAddrPanel; words = kPanelWords; break;
+      case ReadKind::kPaired: address = kAddrPaired; words = kPairedWords; break;
       default: return false;
     }
     current_kind_ = kind;
@@ -840,6 +848,7 @@ class ConnectEngine {
   SlotSchedule status_slots_[kStatusSlots];
   SlotSchedule consumption_slot_;
   SlotSchedule hot_water_slot_;
+  SlotSchedule diag_slot_;
   ReadKind queue_[kQueue] = {};
   size_t queue_length_ = 0;
   uint8_t next_id_ = 1;

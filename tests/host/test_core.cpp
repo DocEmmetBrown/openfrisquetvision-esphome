@@ -1919,6 +1919,38 @@ static void test_burner() {
     CHECK(!e.reading());
   }
 
+  // Diagnostics: panel version and flow limits (0x7931 x 0x16), paired devices (0x7A30 x 4), as read on 01/11/2026.
+  {
+    CHECK(classify_read_address(kAddrPanel) == ReadKind::kPanel && classify_read_address(kAddrPaired) == ReadKind::kPaired);
+    Bytes panel = {0x7E, 0x80, 0xD5, 0x20, 0x81, 0x03, 0x2C};
+    Bytes data(0x2C, 0);
+    data[0] = 0x19;
+    data[1] = 0x01;
+    data[42] = 0x14;
+    data[43] = 0x3C;
+    panel.insert(panel.end(), data.begin(), data.end());
+    PanelDiag diag;
+    CHECK(decode_panel_diag(panel.data(), panel.size(), diag) && diag.version == 0x1901 && diag.flow_min == 20 &&
+          diag.flow_max == 60);
+    CHECK(!decode_panel_diag(panel.data(), panel.size() - 1, diag));
+    const Bytes paired = {0x7E, 0x80, 0xD5, 0x21, 0x81, 0x03, 0x08, 0x03, 0x08, 0x27, 0x00, 0xFF, 0x7E, 0xFF, 0xFF};
+    char text[96];
+    CHECK(format_paired_versions(paired.data(), paired.size(), text, sizeof(text)));
+    CHECK(std::string(text) == "Satellite 08 V27.00, Connect 7E sans version");
+    // Both read every hour at :06:30.
+    ConnectEngine d;
+    d.set_policy(engine_policy(TxLevel::kRead, false));
+    d.clock().set_from_bcd(0, 0x26, 0x11, 0x01, 0x19, 0x06, 0x25);
+    TxRequest tx;
+    bool p = false, q = false;
+    for (uint32_t t = 100; t < 30000; t += 100) {
+      if (!d.poll(t, tx) || tx.kind != TxClass::kReadRequest) continue;
+      const uint16_t address = be16(tx.frame + 6);
+      if (address == kAddrPanel && be16(tx.frame + 8) == kPanelWords) p = true;
+      if (address == kAddrPaired && be16(tx.frame + 8) == kPairedWords) q = true;
+    }
+    CHECK(p && q);
+  }
   // Satellite silence guard: nothing in the satellite's name unless it was heard within 25 min.
   {
     const Bytes &known = F["payload_zone_relay_live"];

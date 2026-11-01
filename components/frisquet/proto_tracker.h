@@ -18,8 +18,12 @@ constexpr uint16_t kAddrHotWaterMode = 0xA0FC;
 constexpr uint16_t kAddrDate = 0xA02B;
 constexpr uint16_t kAddrStatus = 0xA029;         // what the satellite reads: outdoor, date, boiler state, zones
 constexpr uint16_t kAddrFamilyOffset = 0x00C8;
+constexpr uint16_t kAddrPanel = 0x7931;          // panel firmware (BCD, 1901 = V19.01) ... 7946 zone 1 flow min/max
+constexpr uint16_t kPanelWords = 0x16;
+constexpr uint16_t kAddrPaired = 0x7A30;         // paired devices: (index, id) then version, twice
+constexpr uint16_t kPairedWords = 0x04;
 
-enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate, kStatus, kExplore, kBody, kFlue, kSatelliteConsigne, kSatelliteBlock };
+enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate, kStatus, kExplore, kBody, kFlue, kSatelliteConsigne, kSatelliteBlock, kPanel, kPaired };
 
 inline ReadKind classify_read_address(uint16_t address) {
   switch (address) {
@@ -31,6 +35,8 @@ inline ReadKind classify_read_address(uint16_t address) {
     case kAddrStatus: return ReadKind::kStatus;
     case kAddrBodyLive: return ReadKind::kBody;
     case kAddrFlueSnapshot: return ReadKind::kFlue;
+    case kAddrPanel: return ReadKind::kPanel;
+    case kAddrPaired: return ReadKind::kPaired;
     default: break;
   }
   if (address >= kAddrFamilyOffset) return classify_read_address(static_cast<uint16_t>(address - kAddrFamilyOffset));

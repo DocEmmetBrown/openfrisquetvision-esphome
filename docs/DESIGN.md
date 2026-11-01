@@ -729,6 +729,18 @@ ESPHome (`proto_zone_store.h`, enregistrement `FZB1` v1 : masque des zones connu
   quand même. Compteur `direct_skipped`, et un avertissement dans les logs quand le satellite se tait. Les commandes
   manuelles `SAT` / `SATZ` restent possibles. 924 vérifications.
 
+### 10.32 Diagnostics et thermostat HA (01/11/2026 19:40 – 20:10, `0.7.30` – `0.7.31`)
+
+- Lectures horaires (:06:30) de `7931 x16` et `7A30 x4` (`ReadKind::kPanel` / `kPaired`, ajoutées à la liste blanche) :
+  « Chaudière version panneau » = **V19.01**, « Zone 1 départ mini / maxi » = **20 / 60 °C** (`7946`), « Chaudière
+  appareils appairés » = **Satellite 08 V27.00, Connect 7E sans version** (vérifié 20:06:23).
+- Entité **climate « Zone 1 »** : AUTO = `05`, HEAT = `06` (préréglage COMFORT) ou `07` (ECO), OFF = `08` Hors gel ; BOOST =
+  bit `0x40`. Cible = consigne du mode actif (en Auto, période donnée par le bit confort du satellite) ; refusée pendant un
+  boost (la consigne confort porte alors le +1 °C). Action HEATING = état `28`. Une seule modification par appel (la
+  dernière demande remplace la précédente). Essai 19:50 : cible 8,5 en Hors gel → consigne hors-gel 8,5 vérifiée 19:54:33,
+  retour 8,0 vérifié 20:09:19.
+- `dev/ofv_api.py` : actions `switch` et `climate`, et affichage de l'état du thermostat.
+
 ### 10.2 Garde-fous d'émission (phases 2a à 5)
 
 1. Niveaux cumulatifs d'émission : `none` < `read` < `ack` < `write`. `none` ne compile **aucun code d'émission du projet** (le build ne contient ni `transmit_frame` ni le moteur ; vérifié sur l'ELF ; la méthode virtuelle `transmit` de RadioLib reste liée mais n'est jamais appelée) (phases R à 1) ;
