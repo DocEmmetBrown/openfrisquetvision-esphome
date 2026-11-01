@@ -26,10 +26,10 @@ complété sur une vraie chaudière (voir [docs/PROTOCOL-REFERENCE.md](docs/PROT
 
 ## Matériel
 
-| Élément | Détail |
-|---|---|
-| Chaudière | Frisquet **Visio** avec satellite(s) radio Visio, compatible Frisquet Connect |
-| Carte | **Heltec WiFi LoRa 32 V4** (V4.3), version **868 MHz**, avec son antenne |
+| Élément      | Détail                                                                                |
+| ------------ | ------------------------------------------------------------------------------------- |
+| Chaudière    | Frisquet **Visio** avec satellite(s) radio Visio, compatible Frisquet Connect         |
+| Carte        | **Heltec WiFi LoRa 32 V4** (V4.3), version **868 MHz**, avec son antenne              |
 | Alimentation | Câble USB-C et chargeur 5 V, près de la chaudière (portée radio : comme le satellite) |
 
 Un seul Connect par chaudière : si vous avez un Frisquet Connect officiel, la carte le remplace.
@@ -93,16 +93,16 @@ commandes de zone sont acceptées dès que « Zone 1 bloc » vaut **confirmé** 
 
 ## Utilisation
 
-| Entité | Rôle |
-|---|---|
-| Zone 1 (thermostat) | Mode, préréglage, consigne du mode actif |
-| Zone 1 mode (commande) | Auto, Dérogation Confort / Réduit, Confort, Réduit, Hors Gel |
-| Zone 1 consigne confort / réduit / hors-gel | Consignes (pas de 0,5 °C) |
-| Zone 1 boost | +1 °C sur la consigne confort, en Confort ou en période confort ; arrêt automatique après 6 h |
-| Zone 1 programme | 84 caractères hexadécimaux : 6 octets par jour (dimanche d'abord), un bit par demi-heure, bit de poids faible d'abord ; « Zone 1 programme (lisible) » l'affiche en clair |
-| Chaudière mode ECS | Mode d'eau chaude |
-| Chaudière brûleur, état, anomalie, dernière alerte | Suivi de la chaudière |
-| Radio arrêt d'urgence | Coupe toute émission (la carte n'écoute plus que) |
+| Entité                                             | Rôle                                                                                                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zone 1 (thermostat)                                | Mode, préréglage, consigne du mode actif                                                                                                                                  |
+| Zone 1 mode (commande)                             | Auto, Dérogation Confort / Réduit, Confort, Réduit, Hors Gel                                                                                                              |
+| Zone 1 consigne confort / réduit / hors-gel        | Consignes (pas de 0,5 °C)                                                                                                                                                 |
+| Zone 1 boost                                       | +1 °C sur la consigne confort, en Confort ou en période confort ; arrêt automatique après 6 h                                                                             |
+| Zone 1 programme                                   | 84 caractères hexadécimaux : 6 octets par jour (dimanche d'abord), un bit par demi-heure, bit de poids faible d'abord ; « Zone 1 programme (lisible) » l'affiche en clair |
+| Chaudière mode ECS                                 | Mode d'eau chaude                                                                                                                                                         |
+| Chaudière brûleur, état, anomalie, dernière alerte | Suivi de la chaudière                                                                                                                                                     |
+| Radio arrêt d'urgence                              | Coupe toute émission (la carte n'écoute plus que)                                                                                                                         |
 
 Bon à savoir :
 
@@ -115,9 +115,11 @@ Bon à savoir :
 
 - **Tableau de bord** : [homeassistant/dashboard.yaml](homeassistant/dashboard.yaml) (thermostat, zone, chaudière,
   historique, consommations, radio). C'est un modèle : remplacez `PREFIXE` par le préfixe de vos entités, lisible sur
-  n'importe laquelle (`climate.cuisine_frisquette_zone_1` → `cuisine_frisquette` ; il dépend du nom de l'appareil et de sa
-  pièce), ou générez-le : `python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml`. Collez ensuite le résultat
-  dans l'« éditeur de configuration brute » d'un nouveau tableau de bord.
+  n'importe laquelle (`climate.cuisine_frisquet_zone_1` → `cuisine_frisquet` ; il dépend du nom de l'appareil et de sa
+  pièce), ou générez-le : `python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml`. Si toutes vos entités n'ont
+  pas le même préfixe (entités reprises d'un ancien firmware), l'option `--entites` retrouve chacune dans la liste de vos
+  entités (`--help` explique comment l'obtenir depuis Home Assistant). Collez ensuite le résultat dans l'« éditeur de
+  configuration brute » d'un nouveau tableau de bord.
 - **Blueprint de notification** (anomalie, pile du satellite) :
   [homeassistant/blueprints/automation/frisquet_alerte.yaml](homeassistant/blueprints/automation/frisquet_alerte.yaml), à
   copier dans `config/blueprints/automation/` de Home Assistant.
@@ -130,14 +132,14 @@ l'eau chaude, dernière alerte. Sans écran, supprimez les blocs `i2c:`, `font:`
 
 ## Dépannage
 
-| Symptôme | Que faire |
-|---|---|
-| « Radio réseau » = non associé | Refaire l'étape 4. |
-| La chaudière affiche « Appareil incorrect » | Supprimer `pairing_version` de `frisquet.yaml`, reflasher, refaire l'étape 4. |
-| Une commande de zone est refusée | « Zone 1 bloc » n'est pas encore « confirmé » : attendre le prochain échange du satellite (10 min au plus). |
-| « Zone 1 écriture » reste sur `sending` | Le satellite n'a pas encore pris le réglage : attendre 10 min ou appuyer sur « i ». La chaudière, elle, l'applique déjà. |
-| Rien ne bouge après un changement | Vérifier « Radio âge dernière trame » (quelques secondes) et rapprocher la carte de la chaudière. |
-| Comportement anormal | Activer « Radio arrêt d'urgence » : la carte n'émet plus rien. |
+| Symptôme                                    | Que faire                                                                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| « Radio réseau » = non associé              | Refaire l'étape 4.                                                                                                       |
+| La chaudière affiche « Appareil incorrect » | Supprimer `pairing_version` de `frisquet.yaml`, reflasher, refaire l'étape 4.                                            |
+| Une commande de zone est refusée            | « Zone 1 bloc » n'est pas encore « confirmé » : attendre le prochain échange du satellite (10 min au plus).              |
+| « Zone 1 écriture » reste sur `sending`     | Le satellite n'a pas encore pris le réglage : attendre 10 min ou appuyer sur « i ». La chaudière, elle, l'applique déjà. |
+| Rien ne bouge après un changement           | Vérifier « Radio âge dernière trame » (quelques secondes) et rapprocher la carte de la chaudière.                        |
+| Comportement anormal                        | Activer « Radio arrêt d'urgence » : la carte n'émet plus rien.                                                           |
 
 Les journaux détaillés : `esphome logs frisquet.yaml` (passer `logger: level` à `DEBUG` pour voir chaque trame radio).
 
@@ -155,19 +157,19 @@ Les journaux détaillés : `esphome logs frisquet.yaml` (passer `logger: level` 
 
 ### Options du composant `frisquet:`
 
-| Option | Défaut | Rôle |
-|---|---|---|
-| `board` | (obligatoire) | `heltec_v4_3` |
-| `tx` | `none` | `none` (écoute seule), `read`, `ack`, `write` (tout) |
-| `dry_run` | `true` | Construit et journalise les trames sans les émettre |
-| `pairing` | `false` | Autorise le bouton d'association à répondre à la chaudière |
-| `pairing_version` | — | Réponse d'association (version d'un Connect, `01:21:01:02`) au lieu de l'écho du réseau |
-| `satellite_override` | `false` | Effet immédiat des changements de zone 1 (au nom du satellite) |
-| `satellite_association` | appris | Octet d'association du satellite de zone 1 |
-| `network_id`, `association` | appris | Réseau et association, si on les connaît déjà |
-| `rx_boosted_gain` | `false` | Gain de réception renforcé (≈ +3 dB) |
-| `rx_bandwidth` | `234.3` | Bande passante de réception (kHz) |
-| `explore` | `false` | Lectures libres de la mémoire de la chaudière (texte de type `explore`, pour le développement) |
+| Option                      | Défaut        | Rôle                                                                                           |
+| --------------------------- | ------------- | ---------------------------------------------------------------------------------------------- |
+| `board`                     | (obligatoire) | `heltec_v4_3`                                                                                  |
+| `tx`                        | `none`        | `none` (écoute seule), `read`, `ack`, `write` (tout)                                           |
+| `dry_run`                   | `true`        | Construit et journalise les trames sans les émettre                                            |
+| `pairing`                   | `false`       | Autorise le bouton d'association à répondre à la chaudière                                     |
+| `pairing_version`           | —             | Réponse d'association (version d'un Connect, `01:21:01:02`) au lieu de l'écho du réseau        |
+| `satellite_override`        | `false`       | Effet immédiat des changements de zone 1 (au nom du satellite)                                 |
+| `satellite_association`     | appris        | Octet d'association du satellite de zone 1                                                     |
+| `network_id`, `association` | appris        | Réseau et association, si on les connaît déjà                                                  |
+| `rx_boosted_gain`           | `false`       | Gain de réception renforcé (≈ +3 dB)                                                           |
+| `rx_bandwidth`              | `234.3`       | Bande passante de réception (kHz)                                                              |
+| `explore`                   | `false`       | Lectures libres de la mémoire de la chaudière (texte de type `explore`, pour le développement) |
 
 ## Crédits et licence
 

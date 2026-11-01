@@ -7,6 +7,8 @@
 # (il dépend du nom de l'appareil et, selon Home Assistant, de sa pièce ; avec frisquet.yaml tel quel : frisquet).
 #
 # Pour le faire automatiquement : python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml
+# Si vos entités n'ont pas toutes le même préfixe (certaines avec la pièce, d'autres sans, par exemple après avoir changé de
+# firmware), ajoutez --entites entites.txt : voir python3 homeassistant/dashboard.py --help.
 title: Chauffage
 views:
   - title: Chauffage
