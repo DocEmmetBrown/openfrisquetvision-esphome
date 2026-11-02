@@ -80,10 +80,10 @@ views:
         period: day
         stat_types: [change]
         entities:
-          - entity: sensor.frisquet_consommation_chauffage_annee
-            name: Chauffage
-          - entity: sensor.frisquet_consommation_eau_chaude_annee
-            name: Eau chaude
+          - entity: sensor.frisquet_consommation_chauffage_estimee
+            name: Chauffage (estimé)
+          - entity: sensor.frisquet_consommation_eau_chaude_estimee
+            name: Eau chaude (estimé)
 
       - type: entities
         title: Radio et association

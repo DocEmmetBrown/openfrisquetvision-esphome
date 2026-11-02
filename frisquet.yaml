@@ -7,6 +7,10 @@
 substitutions:
   name: frisquet
   friendly_name: Frisquet
+  # Consommation estimée (plaque signalétique de la chaudière) : puissance nominale en kW, et charge moyenne du brûleur
+  # (une chaudière à condensation module entre ~25 et 100 %). Ajuster la charge en comparant avec le compteur de gaz.
+  burner_power_kw: "25"
+  burner_average_load: "0.6"
 
 esphome:
   name: ${name}
@@ -125,15 +129,20 @@ frisquet:
     name: Chaudière horloge
     entity_category: diagnostic
 
-  # Consommations (kWh, comme le Frisquet Connect)
+  # Consommations comptées par la chaudière (kWh, comme le Frisquet Connect). Certaines chaudières ne les comptent pas
+  # (toujours 0, panneau V19.01 par exemple) : désactivées par défaut, voir plus bas la consommation estimée.
   consumption_hot_water:
     name: Consommation eau chaude (jour)
+    disabled_by_default: true
   consumption_heating:
     name: Consommation chauffage (jour)
+    disabled_by_default: true
   annual_consumption_hot_water:
     name: Consommation eau chaude (année)
+    disabled_by_default: true
   annual_consumption_heating:
     name: Consommation chauffage (année)
+    disabled_by_default: true
 
   # Diagnostic
   panel_version:
@@ -223,6 +232,50 @@ button:
     entity_category: config
 
 sensor:
+  # Consommation estimée à partir du temps de flamme : brûleur allumé avec demande de chauffage = chauffage, sans demande
+  # = eau chaude. Pour le tableau Énergie de Home Assistant.
+  - platform: template
+    id: power_heating
+    name: Chaudière puissance chauffage (estimée)
+    unit_of_measurement: kW
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      const bool heating = id(boiler_state).has_state() && id(boiler_state).state == "En marche";
+      return id(burner).has_state() && id(burner).state && heating ? ${burner_power_kw} * ${burner_average_load} : 0.0f;
+  - platform: template
+    id: power_hot_water
+    name: Chaudière puissance eau chaude (estimée)
+    unit_of_measurement: kW
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      const bool heating = id(boiler_state).has_state() && id(boiler_state).state == "En marche";
+      return id(burner).has_state() && id(burner).state && !heating ? ${burner_power_kw} * ${burner_average_load} : 0.0f;
+  - platform: integration
+    name: Consommation chauffage (estimée)
+    sensor: power_heating
+    time_unit: h
+    integration_method: left
+    restore: true
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: integration
+    name: Consommation eau chaude (estimée)
+    sensor: power_hot_water
+    time_unit: h
+    integration_method: left
+    restore: true
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 2
   - platform: uptime
     name: Uptime
     entity_category: diagnostic
