@@ -18,8 +18,10 @@ complété sur une vraie chaudière (voir [docs/PROTOCOL-REFERENCE.md](docs/PROT
   à son prochain réveil (au plus 10 min, tout de suite si vous appuyez sur sa touche « i »).
 - Consignes confort / réduit / hors-gel, programme hebdomadaire, mode d'**eau chaude** (Max, Eco, Eco Horaires, Eco+,
   Eco+ Horaires, Stop).
-- Mesures : ambiante, extérieure, eau chaude, départ, corps de chauffe, fumées, pression, **brûleur allumé**,
-  **consommations** (jour et année, en kWh, compatibles avec le tableau Énergie).
+- Mesures : ambiante, extérieure, eau chaude, départ, corps de chauffe, fumées, pression, **brûleur allumé**.
+- **Consommation** chauffage et eau chaude en kWh pour le tableau Énergie : **estimée** à partir du temps de flamme et de la
+  puissance de la chaudière (`burner_power_kw`, `burner_average_load` en tête de `frisquet.yaml`). Les compteurs de la
+  chaudière elle-même sont aussi lus, mais certaines ne comptent pas (toujours 0) : ils sont désactivés par défaut.
 - **Alertes** : anomalie chaudière, pile du satellite (si la carte l'entend), événements.
 - Diagnostic : version du panneau, appareils appairés, qualité radio. **Écran OLED** de la carte.
 - Garde-fous : arrêt d'urgence (plus aucune émission), aucune émission au nom d'un satellite qui ne répond plus.
@@ -102,6 +104,7 @@ commandes de zone sont acceptées dès que « Zone 1 bloc » vaut **confirmé** 
 | Zone 1 programme                                   | 84 caractères hexadécimaux : 6 octets par jour (dimanche d'abord), un bit par demi-heure, bit de poids faible d'abord ; « Zone 1 programme (lisible) » l'affiche en clair |
 | Chaudière mode ECS                                 | Mode d'eau chaude                                                                                                                                                         |
 | Chaudière brûleur, état, anomalie, dernière alerte | Suivi de la chaudière                                                                                                                                                     |
+| Consommation chauffage / eau chaude (estimée) | kWh pour le tableau Énergie ; ajuster `burner_average_load` avec le compteur de gaz |
 | Radio arrêt d'urgence                              | Coupe toute émission (la carte n'écoute plus que)                                                                                                                         |
 
 Bon à savoir :
