@@ -32,10 +32,10 @@ esphome:
       then:
         - lambda: |-
             if (id(holiday_start).year > 0)
-              id(frisquet_radio).set_holiday_start(id(holiday_start).year, id(holiday_start).month, id(holiday_start).day,
+              id(frisquet_component).set_holiday_start(id(holiday_start).year, id(holiday_start).month, id(holiday_start).day,
                                                    id(holiday_start).hour, id(holiday_start).minute, id(holiday_start).second);
             if (id(holiday_end).year > 0)
-              id(frisquet_radio).set_holiday_end(id(holiday_end).year, id(holiday_end).month, id(holiday_end).day,
+              id(frisquet_component).set_holiday_end(id(holiday_end).year, id(holiday_end).month, id(holiday_end).day,
                                                  id(holiday_end).hour, id(holiday_end).minute, id(holiday_end).second);
 
 esp32:
@@ -80,7 +80,7 @@ ota:
     encryption: {}
 
 frisquet:
-  id: frisquet_radio
+  id: frisquet_component
   board: heltec_v4_3
   # Émission complète : lectures, accusés et écritures (consignes, modes, programme, eau chaude).
   tx: write
@@ -203,7 +203,7 @@ datetime:
     set_action:
       then:
         - lambda: |-
-            id(frisquet_radio).set_holiday_start(x.year, x.month, x.day_of_month, x.hour, x.minute, x.second);
+            id(frisquet_component).set_holiday_start(x.year, x.month, x.day_of_month, x.hour, x.minute, x.second);
   - platform: template
     id: holiday_end
     type: datetime
@@ -213,7 +213,7 @@ datetime:
     set_action:
       then:
         - lambda: |-
-            id(frisquet_radio).set_holiday_end(x.year, x.month, x.day_of_month, x.hour, x.minute, x.second);
+            id(frisquet_component).set_holiday_end(x.year, x.month, x.day_of_month, x.hour, x.minute, x.second);
 
 select:
   - platform: frisquet
