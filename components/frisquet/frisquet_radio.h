@@ -98,6 +98,8 @@ enum TextId : uint8_t {
   kPanelVersion,
   kPairedVersions,
   kLastAlert,
+  kHolidayState,
+  kHolidayWrite,
   kTextCount,
 };
 
@@ -168,6 +170,10 @@ class FrisquetRadio : public Component {
   // Hot-water (ECS) mode: `name` is one of the select's options. False when it cannot be queued.
   bool request_hot_water_mode(const std::string &name);
   void republish_hot_water_mode();
+  bool set_holiday_start(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second);
+  bool set_holiday_end(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second);
+  bool request_holiday();
+  bool cancel_holiday();
 #ifdef USE_SELECT
   void set_hot_water_select(select::Select *s) { hot_water_select_ = s; }
   void set_zone_mode_select(select::Select *s) { zone_mode_select_ = s; }
@@ -231,6 +237,7 @@ class FrisquetRadio : public Component {
   void tx_step_(uint32_t now);
   void transmit_pending_();
   void sync_hot_water_();
+  void sync_holiday_();
   void sync_zone_();
   void restore_zone_blocks_();
   void save_zone_blocks_();
@@ -287,6 +294,11 @@ class FrisquetRadio : public Component {
   uint32_t last_stats_ms_{0};
   uint32_t tx_errors_{0};
   ::frisquet::WriteState last_write_state_{::frisquet::WriteState::kIdle};
+  ::frisquet::WriteState last_holiday_write_state_{::frisquet::WriteState::kIdle};
+  uint32_t holiday_start_{0};
+  uint32_t holiday_end_{0};
+  bool holiday_start_valid_{false};
+  bool holiday_end_valid_{false};
   int last_published_mode_{-1};
   ::frisquet::WriteState last_zone_state_{::frisquet::WriteState::kIdle};
   int last_zone_raw_[3]{-1, -1, -1};

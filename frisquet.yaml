@@ -20,12 +20,23 @@ esphome:
     version: "1.0.0"
   on_boot:
     # Écran OLED de la Heltec V4 : allumer son alimentation (Vext, GPIO36 active à l'état bas) avant le bus I2C.
-    priority: 1100
-    then:
-      - lambda: |-
-          pinMode(36, OUTPUT);
-          digitalWrite(36, LOW);
-          delay(50);
+    - priority: 1100
+      then:
+        - lambda: |-
+            pinMode(36, OUTPUT);
+            digitalWrite(36, LOW);
+            delay(50);
+    # Restore the selected vacation window into the radio component before Home Assistant can trigger an action.
+    # The datetime entities themselves restore their values from flash.
+    - priority: -100
+      then:
+        - lambda: |-
+            if (id(holiday_start).year > 0)
+              id(frisquet_radio).set_holiday_start(id(holiday_start).year, id(holiday_start).month, id(holiday_start).day,
+                                                   id(holiday_start).hour, id(holiday_start).minute, id(holiday_start).second);
+            if (id(holiday_end).year > 0)
+              id(frisquet_radio).set_holiday_end(id(holiday_end).year, id(holiday_end).month, id(holiday_end).day,
+                                                 id(holiday_end).hour, id(holiday_end).minute, id(holiday_end).second);
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -69,6 +80,7 @@ ota:
     encryption: {}
 
 frisquet:
+  id: frisquet_radio
   board: heltec_v4_3
   # Émission complète : lectures, accusés et écritures (consignes, modes, programme, eau chaude).
   tx: write
@@ -125,6 +137,11 @@ frisquet:
     name: Chaudière pression
   hot_water_mode:
     name: Chaudière mode ECS (lu)
+  holiday_state:
+    name: Chaudière vacances (état)
+  holiday_write:
+    name: Chaudière vacances (écriture)
+    entity_category: diagnostic
   boiler_clock:
     name: Chaudière horloge
     entity_category: diagnostic
@@ -175,6 +192,28 @@ frisquet:
 climate:
   - platform: frisquet
     name: Zone 1
+
+datetime:
+  - platform: template
+    id: holiday_start
+    type: datetime
+    name: Chaudière vacances début
+    optimistic: true
+    restore_value: true
+    set_action:
+      then:
+        - lambda: |-
+            id(frisquet_radio).set_holiday_start(x.year, x.month, x.day_of_month, x.hour, x.minute, x.second);
+  - platform: template
+    id: holiday_end
+    type: datetime
+    name: Chaudière vacances fin
+    optimistic: true
+    restore_value: true
+    set_action:
+      then:
+        - lambda: |-
+            id(frisquet_radio).set_holiday_end(x.year, x.month, x.day_of_month, x.hour, x.minute, x.second);
 
 select:
   - platform: frisquet
@@ -227,6 +266,12 @@ button:
     type: forget_network
     name: Radio oublier le réseau appris
     entity_category: config
+  - platform: frisquet
+    type: holiday_activate
+    name: Chaudière activer les vacances
+  - platform: frisquet
+    type: holiday_cancel
+    name: Chaudière annuler les vacances
   - platform: restart
     name: Redémarrer
     entity_category: config

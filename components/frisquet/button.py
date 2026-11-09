@@ -12,7 +12,13 @@ CONF_FRISQUET_ID = "frisquet_id"
 # recover_network: listen 30 s on the broadcast network for the boiler's pairing offer, keep its NetworkID.
 # associate: same, then confirm as the Connect (needs `pairing: true`); the association byte changes too.
 # forget_network: back to the YAML NetworkID and association.
-TYPES = {"recover_network": "kRecoverNetwork", "associate": "kAssociate", "forget_network": "kForgetNetwork"}
+TYPES = {
+    "recover_network": "kRecoverNetwork",
+    "associate": "kAssociate",
+    "forget_network": "kForgetNetwork",
+    "holiday_activate": "kHolidayActivate",
+    "holiday_cancel": "kHolidayCancel",
+}
 
 FrisquetButton = frisquet_ns.class_("FrisquetButton", button.Button, cg.Component)
 

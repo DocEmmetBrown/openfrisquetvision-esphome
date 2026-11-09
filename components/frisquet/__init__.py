@@ -172,6 +172,9 @@ TEXT_SENSORS = {
     # Last alert: a device's text alert (type 43, e.g. "SATELLITE Z1 - CHANGER PILES"), a boiler event (type 45), or an
     # anomaly bit of the boiler state. "Aucune" once cleared.
     "last_alert": text_sensor.text_sensor_schema(icon="mdi:alert-circle-outline"),
+    # Holiday period read from the boiler; the write state reports whether an update was verified.
+    "holiday_state": text_sensor.text_sensor_schema(),
+    "holiday_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 

@@ -14,6 +14,12 @@ void FrisquetButton::press_action() {
     case kRecoverNetwork: this->parent_->start_network_recovery(); break;
     case kAssociate: this->parent_->start_association(); break;
     case kForgetNetwork: this->parent_->forget_network(); break;
+    case kHolidayActivate:
+      if (!this->parent_->request_holiday()) ESP_LOGW(TAG, "Holiday activation refused (invalid dates or write unavailable)");
+      break;
+    case kHolidayCancel:
+      if (!this->parent_->cancel_holiday()) ESP_LOGW(TAG, "Holiday cancellation refused (boiler state unknown or write unavailable)");
+      break;
   }
 }
 

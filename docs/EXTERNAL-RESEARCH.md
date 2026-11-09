@@ -292,10 +292,11 @@ The modules below are the `components/frisquet/proto_*.h` headers.
    - Stop: restore the stored comfort setpoint and clear `0x40`, after 6 h or on request.
    - Persist the original setpoint, because the Connect owns the timer.
    - Not available on underfloor circuits or with outdoor-only regulation.
-6. **Holiday**: write `A0F0` start and end (word-swapped Unix time, local midnight), verify by reading back, and expose a date range
-   or switch.
-   - Uncertain: d33d33's frames use 01:00 UTC, which is local midnight in winter.
-   - The rest of the `A0F0` block (`A0FC` DHW mode, serial) must be copied unchanged. **Read the whole block before writing.**
+6. **Holiday**: the firmware now exposes a start/end date-time range and an explicit activate/cancel action. The inferred
+   `A0F0` partial write changes only four words, then reads `A0F0 × 0D` back for verification.
+   - Still unverified on a real boiler: write frame acceptance, timezone/DST interpretation, end-point semantics, and the
+     heating/DHW behavior. Test a short window while monitoring the boiler before relying on it.
+   - The partial write is intended to leave the remaining `A0F0` words (`A0F8` date, `A0FC` DHW mode, serial) untouched.
 7. **Zone byte 5**: keep "copy from the last relay". If tests show `0x80` is required for permanent Confort or Réduit, set it
    when writing modes `06` and `07` and clear it for `05`.
 8. **Diagnostics sensors**: panel version (`7931`/`7541`), versions of the paired devices (`7A30–7A33`), flow target (`A033`),

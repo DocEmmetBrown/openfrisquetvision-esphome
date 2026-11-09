@@ -18,6 +18,10 @@ complété sur une vraie chaudière (voir [docs/PROTOCOL-REFERENCE.md](docs/PROT
   à son prochain réveil (au plus 10 min, tout de suite si vous appuyez sur sa touche « i »).
 - Consignes confort / réduit / hors-gel, programme hebdomadaire, mode d'**eau chaude** (Max, Eco, Eco Horaires, Eco+,
   Eco+ Horaires, Stop).
+- **Mode vacances** : programmer début et fin à la minute (y compris une absence de quelques heures), puis activer ou
+  annuler explicitement la période depuis Home Assistant. La commande et son état vérifié sont visibles dans le tableau
+  de bord (entités date/heure nécessitant Home Assistant 2024.4 ou plus récent). L'écriture du bloc vacances A0F0 reste à
+  confirmer sur une chaudière réelle.
 - Mesures : ambiante, extérieure, eau chaude, départ, corps de chauffe, fumées, pression, **brûleur allumé**.
 - **Consommation** chauffage et eau chaude en kWh pour le tableau Énergie : **estimée** à partir du temps de flamme et de la
   puissance de la chaudière (`burner_power_kw`, `burner_average_load` en tête de `frisquet.yaml`). Les compteurs de la
@@ -103,6 +107,8 @@ commandes de zone sont acceptées dès que « Zone 1 bloc » vaut **confirmé** 
 | Zone 1 boost                                       | +1 °C sur la consigne confort, en Confort ou en période confort ; arrêt automatique après 6 h                                                                             |
 | Zone 1 programme                                   | 84 caractères hexadécimaux : 6 octets par jour (dimanche d'abord), un bit par demi-heure, bit de poids faible d'abord ; « Zone 1 programme (lisible) » l'affiche en clair |
 | Chaudière mode ECS                                 | Mode d'eau chaude                                                                                                                                                         |
+| Chaudière vacances début / fin                     | Dates et heures locales, conservées après redémarrage                                                                                                                      |
+| Chaudière activer / annuler les vacances           | Programme ou efface explicitement la période ; « Chaudière vacances (état) » confirme la valeur relue                                                                       |
 | Chaudière brûleur, état, anomalie, dernière alerte | Suivi de la chaudière                                                                                                                                                     |
 | Consommation chauffage / eau chaude (estimée) | kWh pour le tableau Énergie ; ajuster `burner_average_load` avec le compteur de gaz |
 | Radio arrêt d'urgence                              | Coupe toute émission (la carte n'écoute plus que)                                                                                                                         |

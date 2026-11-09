@@ -23,13 +23,14 @@ constexpr uint16_t kPanelWords = 0x16;
 constexpr uint16_t kAddrPaired = 0x7A30;         // paired devices: (index, id) then version, twice
 constexpr uint16_t kPairedWords = 0x04;
 
-enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHotWaterMode, kDate, kStatus, kExplore, kBody, kFlue, kSatelliteConsigne, kSatelliteBlock, kPanel, kPaired };
+enum class ReadKind : uint8_t { kUnknown, kInfo, kConsumption, kAnnualConsumption, kHoliday, kHotWaterMode, kDate, kStatus, kExplore, kBody, kFlue, kSatelliteConsigne, kSatelliteBlock, kPanel, kPaired };
 
 inline ReadKind classify_read_address(uint16_t address) {
   switch (address) {
     case kAddrInfo: return ReadKind::kInfo;
     case kAddrConsumption: return ReadKind::kConsumption;
     case kAddrAnnualConsumption: return ReadKind::kAnnualConsumption;
+    case kAddrHoliday: return ReadKind::kHoliday;
     case kAddrHotWaterMode: return ReadKind::kHotWaterMode;
     case kAddrDate: return ReadKind::kDate;
     case kAddrStatus: return ReadKind::kStatus;

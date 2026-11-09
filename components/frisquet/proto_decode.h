@@ -348,6 +348,26 @@ inline bool decode_hot_water_mode(const uint8_t *frame, size_t length, DecodedHo
   return true;
 }
 
+struct HolidayBlock {
+  uint32_t start = 0;
+  uint32_t end = 0;
+};
+
+inline bool decode_holiday_values(const uint8_t *data, size_t length, HolidayBlock &out) {
+  if (!data || length < 8) return false;
+  out.start = decode_holiday_timestamp(data);
+  out.end = decode_holiday_timestamp(data + 4);
+  return (out.start == 0 && out.end == 0) || (out.start != 0 && out.end > out.start);
+}
+
+inline bool decode_holiday_block(const uint8_t *frame, size_t length, HolidayBlock &out) {
+  Header header;
+  if (!parse_header(frame, length, header)) return false;
+  if (header.type != kRead || !header.is_ack() || header.source != kIdBoiler) return false;
+  if (length < 7 + 2 * kHolidayWords || frame[6] != 2 * kHolidayWords) return false;
+  return decode_holiday_values(frame + 7, frame[6], out);
+}
+
 // Weekly programme: 7 days (Sunday first) of 6 bytes, bit set = comfort, bit 0 of byte 0 = 00:00-00:30.
 constexpr size_t kProgramSize = 42;
 

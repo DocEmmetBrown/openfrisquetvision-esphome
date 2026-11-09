@@ -413,6 +413,12 @@ static void test_boiler_clock() {
   CHECK(!clock.set_from_bcd(0, 0x26, 0x10, 0x25, 0x24, 0x57, 0x03));
   CHECK(!clock.set_from_bcd(0, 0x19, 0x10, 0x25, 0x17, 0x57, 0x03));
   CHECK(clock.seconds(0) == 1835438400u);
+  uint32_t holiday_time = 0;
+  CHECK(civil_to_timestamp(2024, 9, 1, 0, 0, 0, holiday_time));
+  CHECK(holiday_time == 0x66D3AE80u);
+  CHECK(civil_to_timestamp(2024, 2, 29, 23, 59, 59, holiday_time));
+  CHECK(!civil_to_timestamp(2023, 2, 29, 0, 0, 0, holiday_time));
+  CHECK(!civil_to_timestamp(2024, 9, 1, 24, 0, 0, holiday_time));
 }
 
 static frisquet::TxPolicy engine_policy(frisquet::TxLevel level, bool dry_run) {
@@ -536,7 +542,7 @@ static void test_engine_reads() {
       CHECK(tx.verdict == TxVerdict::kDryRun);
       ++shown;
     }
-  CHECK(shown == 4 && dry.stats().dry_runs == 4 && !dry.reading());
+  CHECK(shown == 5 && dry.stats().dry_runs == 5 && !dry.reading());
 
   // Level none: reads are blocked and abandoned, not retried in a loop.
   ConnectEngine none;
@@ -549,7 +555,7 @@ static void test_engine_reads() {
       CHECK(tx.verdict == TxVerdict::kBlockedLevel);
       ++blocked;
     }
-  CHECK(blocked == 4 && none.stats().blocked == 4);
+  CHECK(blocked == 5 && none.stats().blocked == 5);
 }
 
 static void test_engine_schedule_and_failure() {
@@ -709,10 +715,70 @@ static void test_hot_water_write_frame_and_gate() {
   CHECK(evaluate_tx(p, expected, sizeof(expected)) == TxVerdict::kBlockedKillSwitch);
 }
 
+static void test_holiday_write_frame_and_gate() {
+  using namespace frisquet;
+  uint8_t out[32];
+  const uint32_t start = 0x66D3AE80u;
+  const uint32_t end = start + 3600;
+  const size_t n = build_holiday_write(out, sizeof(out), kIdConnect, 0xE3, 0x01, start, end);
+  const uint8_t expected[kHolidayWriteLength] = {0x80, 0x7E, 0xE3, 0x01, 0x01, 0x17, 0xA0, 0xF0,
+                                                  0x00, 0x04, 0xA0, 0xF0, 0x00, 0x04, 0x08, 0x00,
+                                                  0xAE, 0x80, 0x66, 0xD3, 0xBC, 0x90, 0x66, 0xD3};
+  CHECK(n == sizeof(expected) && memcmp(out, expected, n) == 0);
+  CHECK(build_holiday_write(out, kHolidayWriteLength - 1, kIdConnect, 0xE3, 1, start, end) == 0);
+  CHECK(build_holiday_write(out, sizeof(out), kIdConnect, 0xE3, 1, 0, end) == 0);
+  CHECK(build_holiday_write(out, sizeof(out), kIdConnect, 0xE3, 1, end, start) == 0);
+
+  TxPolicy policy = engine_policy(TxLevel::kWrite, false);
+  CHECK(evaluate_tx(policy, expected, sizeof(expected)) == TxVerdict::kSend);
+  uint8_t cancel[kHolidayWriteLength];
+  CHECK(build_holiday_write(cancel, sizeof(cancel), kIdConnect, 0xE3, 2, 0, 0) == sizeof(cancel));
+  CHECK(evaluate_tx(policy, cancel, sizeof(cancel)) == TxVerdict::kSend);
+  policy.level = TxLevel::kAck;
+  CHECK(evaluate_tx(policy, expected, sizeof(expected)) == TxVerdict::kBlockedLevel);
+  policy.level = TxLevel::kWrite;
+  uint8_t bad[kHolidayWriteLength];
+  memcpy(bad, expected, sizeof(bad));
+  bad[7] = 0xF1;
+  CHECK(evaluate_tx(policy, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  memset(bad + 20, 0, 4);
+  CHECK(evaluate_tx(policy, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  policy.kill_switch = true;
+  CHECK(evaluate_tx(policy, expected, sizeof(expected)) == TxVerdict::kBlockedKillSwitch);
+
+  Bytes reply(7 + 2 * kHolidayWords, 0);
+  reply[0] = kIdConnect;
+  reply[1] = kIdBoiler;
+  reply[2] = 0xE3;
+  reply[4] = 0x81;
+  reply[5] = kRead;
+  reply[6] = 2 * kHolidayWords;
+  encode_holiday_timestamp(start, reply.data() + 7);
+  encode_holiday_timestamp(end, reply.data() + 11);
+  HolidayBlock decoded;
+  CHECK(decode_holiday_block(reply.data(), reply.size(), decoded));
+  CHECK(decoded.start == start && decoded.end == end);
+}
+
 static Bytes with_id(const Bytes &frame, uint8_t id) {
   Bytes copy = frame;
   copy[3] = id;
   return copy;
+}
+
+static Bytes holiday_read_response(uint8_t id, uint32_t start, uint32_t end) {
+  Bytes frame(7 + 2 * frisquet::kHolidayWords, 0);
+  frame[0] = frisquet::kIdConnect;
+  frame[1] = frisquet::kIdBoiler;
+  frame[2] = 0xE3;
+  frame[3] = id;
+  frame[4] = 0x81;
+  frame[5] = frisquet::kRead;
+  frame[6] = 2 * frisquet::kHolidayWords;
+  frisquet::encode_holiday_timestamp(start, frame.data() + 7);
+  frisquet::encode_holiday_timestamp(end, frame.data() + 11);
+  return frame;
 }
 
 static void test_engine_hot_water_write() {
@@ -733,6 +799,10 @@ static void test_engine_hot_water_write() {
       CHECK(e.on_frame(now + 50, with_id(F[answers[i]], tx.frame[3]).data(), F[answers[i]].size(), result));
       now += 100;
     }
+    CHECK(e.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
+    const Bytes holiday = holiday_read_response(tx.frame[3], 0, 0);
+    CHECK(e.on_frame(now + 50, holiday.data(), holiday.size(), result) && result.kind == ReadKind::kHoliday);
+    now += 100;
   };
 
   // Not known before the first read of 0xA0FC: the request is refused.
@@ -752,7 +822,7 @@ static void test_engine_hot_water_write() {
   CHECK(!e.request_hot_water_mode(HotWaterMode::kMax));  // one write at a time
   CHECK(e.poll(now, tx));
   CHECK(tx.kind == TxClass::kHotWaterWrite && tx.verdict == TxVerdict::kSend && tx.length == 17);
-  CHECK(tx.frame[3] == 0x8A && tx.frame[16] == 0x88);
+  CHECK(tx.frame[3] == 0x8B && tx.frame[16] == 0x88);
   CHECK(e.write_state() == WriteState::kSending);
   const uint8_t write_id = tx.frame[3];
   // The boiler's INIT acknowledgement, as captured on the air: it carries the new value (00 88) back.
@@ -822,6 +892,66 @@ static void test_engine_hot_water_write() {
   CHECK(!q.poll(now, tx));
   CHECK(q.write_state() == WriteState::kQueued);
   CHECK(q.poll(now + 120000, tx) && tx.kind == TxClass::kHotWaterWrite);
+}
+
+static void test_engine_holiday_write() {
+  using namespace frisquet;
+  ConnectEngine engine;
+  ReadResult result;
+  TxRequest tx;
+  engine.set_policy(engine_policy(TxLevel::kWrite, false));
+  engine.set_next_message_id(0x86);
+  engine.clock().set_from_bcd(0, 0x26, 0x10, 0x25, 0x17, 0x57, 0x15);
+  CHECK(!engine.request_holiday(1, 2));
+  ConnectEngine clear_unknown;
+  clear_unknown.set_policy(engine_policy(TxLevel::kWrite, false));
+  CHECK(clear_unknown.request_holiday(0, 0));
+  engine.request_initial_reads();
+  uint32_t now = 0;
+  const char *answers[] = {"payload_79f2_idle", "payload_7a18", "payload_a063", "payload_a0fc"};
+  for (const char *name : answers) {
+    CHECK(engine.poll(now, tx));
+    const Bytes answer = with_id(F[name], tx.frame[3]);
+    CHECK(engine.on_frame(now + 50, answer.data(), answer.size(), result));
+    now += 100;
+  }
+  CHECK(engine.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
+  const Bytes no_holiday = holiday_read_response(tx.frame[3], 0, 0);
+  CHECK(engine.on_frame(now + 50, no_holiday.data(), no_holiday.size(), result));
+  CHECK(engine.holiday_known() && engine.holiday().start == 0);
+
+  uint32_t start = 0, end = 0;
+  CHECK(civil_to_timestamp(2026, 11, 9, 15, 0, 0, start));
+  CHECK(civil_to_timestamp(2026, 11, 9, 17, 30, 0, end));
+  CHECK(!engine.request_holiday(end, start));
+  CHECK(engine.request_holiday(start, end));
+  CHECK(!engine.request_holiday(0, 0));
+  now += 100;
+  CHECK(engine.poll(now, tx) && tx.kind == TxClass::kHolidayWrite && tx.verdict == TxVerdict::kSend);
+  CHECK(decode_holiday_timestamp(tx.frame + 16) == start && decode_holiday_timestamp(tx.frame + 20) == end);
+  const uint8_t write_id = tx.frame[3];
+  const Bytes ack = {kIdConnect, kIdBoiler, 0xE3, write_id, 0x81, kInit, 0x02, 0x00, 0x00};
+  CHECK(!engine.on_frame(now + 50, ack.data(), ack.size(), result));
+  CHECK(engine.holiday_write_state() == WriteState::kAcked);
+  now += 100;
+  CHECK(engine.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
+  const Bytes verify = holiday_read_response(tx.frame[3], start, end);
+  CHECK(engine.on_frame(now + 50, verify.data(), verify.size(), result));
+  CHECK(engine.holiday_write_state() == WriteState::kVerified);
+  CHECK(engine.holiday().start == start && engine.holiday().end == end);
+
+  CHECK(engine.request_holiday(0, 0));
+  now += 100;
+  CHECK(engine.poll(now, tx) && tx.kind == TxClass::kHolidayWrite);
+  const uint8_t cancel_id = tx.frame[3];
+  const Bytes cancel_ack = {kIdConnect, kIdBoiler, 0xE3, cancel_id, 0x81, kInit, 0x02, 0x00, 0x00};
+  CHECK(!engine.on_frame(now + 50, cancel_ack.data(), cancel_ack.size(), result));
+  now += 100;
+  CHECK(engine.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
+  const Bytes canceled = holiday_read_response(tx.frame[3], 0, 0);
+  CHECK(engine.on_frame(now + 50, canceled.data(), canceled.size(), result));
+  CHECK(engine.holiday_write_state() == WriteState::kVerified);
+  CHECK(engine.holiday().start == 0 && engine.holiday().end == 0);
 }
 
 static void test_zone_write() {
@@ -2498,7 +2628,9 @@ int main() {
   test_engine_reads();
   test_engine_schedule_and_failure();
   test_hot_water_write_frame_and_gate();
+  test_holiday_write_frame_and_gate();
   test_engine_hot_water_write();
+  test_engine_holiday_write();
   test_zone_write();
   test_zone_mode_and_program_write();
   test_program_text();

@@ -8,6 +8,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include "proto_clock.h"
 
 namespace esphome {
 namespace frisquet_radio {
@@ -117,6 +118,48 @@ bool FrisquetRadio::request_hot_water_mode(const std::string &name) {
 void FrisquetRadio::republish_hot_water_mode() {
 #ifdef FRISQUET_TX_ENABLED
   this->last_published_mode_ = -1;  // forces sync_hot_water_() to publish the boiler's mode again
+#endif
+}
+
+bool FrisquetRadio::set_holiday_start(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute,
+                                      uint8_t second) {
+  if (!::frisquet::civil_to_timestamp(year, month, day, hour, minute, second, this->holiday_start_)) {
+    this->holiday_start_valid_ = false;
+    ESP_LOGW(TAG, "Holiday start rejected: invalid or unsupported local date/time");
+    return false;
+  }
+  this->holiday_start_valid_ = true;
+  return true;
+}
+
+bool FrisquetRadio::set_holiday_end(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute,
+                                    uint8_t second) {
+  if (!::frisquet::civil_to_timestamp(year, month, day, hour, minute, second, this->holiday_end_)) {
+    this->holiday_end_valid_ = false;
+    ESP_LOGW(TAG, "Holiday end rejected: invalid or unsupported local date/time");
+    return false;
+  }
+  this->holiday_end_valid_ = true;
+  return true;
+}
+
+bool FrisquetRadio::request_holiday() {
+#ifdef FRISQUET_TX_ENABLED
+  if (!this->holiday_start_valid_ || !this->holiday_end_valid_ || this->holiday_end_ <= this->holiday_start_) {
+    ESP_LOGW(TAG, "Holiday activation refused: set a valid end date/time after the start");
+    return false;
+  }
+  return this->engine_.request_holiday(this->holiday_start_, this->holiday_end_);
+#else
+  return false;
+#endif
+}
+
+bool FrisquetRadio::cancel_holiday() {
+#ifdef FRISQUET_TX_ENABLED
+  return this->engine_.request_holiday(0, 0);
+#else
+  return false;
 #endif
 }
 
@@ -326,6 +369,14 @@ void FrisquetRadio::sync_hot_water_() {
 #endif
     }
   }
+}
+
+void FrisquetRadio::sync_holiday_() {
+  const ::frisquet::WriteState state = this->engine_.holiday_write_state();
+  if (state == this->last_holiday_write_state_) return;
+  this->last_holiday_write_state_ = state;
+  ESP_LOGI(TAG, "Holiday write: %s", write_state_name(state));
+  this->publish_text_(kHolidayWrite, write_state_name(state));
 }
 #else
 bool FrisquetRadio::request_zone_setpoint(uint8_t, float) { return false; }
@@ -710,6 +761,7 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
     case ::frisquet::TxClass::kZoneAck: return "zone-ack";
     case ::frisquet::TxClass::kPushAck: return "push-ack";
     case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
+    case ::frisquet::TxClass::kHolidayWrite: return "holiday-write";
     case ::frisquet::TxClass::kZoneWrite: return "zone-write";
     case ::frisquet::TxClass::kSatelliteConsigne: return "satellite-consigne";
     case ::frisquet::TxClass::kSatelliteBlock: return "satellite-block";
@@ -720,6 +772,7 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
 
 void FrisquetRadio::tx_step_(uint32_t now) {
   this->sync_hot_water_();
+  this->sync_holiday_();
   this->sync_zone_();
   if (this->engine_.take_explore_failed())
     ESP_LOGI(TAG, "EXPLORE %04X+%02X: %s", this->engine_.explore_address(), this->engine_.explore_words(),
@@ -945,6 +998,29 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
         this->publish_(kAnnualHotWater, annual.hot_water);
         this->publish_(kAnnualHeating, annual.heating);
       }
+      break;
+    }
+    case ::frisquet::ReadKind::kHoliday: {
+      ::frisquet::HolidayBlock holiday;
+      if (!::frisquet::decode_holiday_block(frame, length, holiday)) break;
+      if (holiday.start == 0) {
+        this->publish_text_(kHolidayState, "Aucune");
+        break;
+      }
+      const time_t start = static_cast<time_t>(holiday.start);
+      const time_t end = static_cast<time_t>(holiday.end);
+      struct tm start_tm {};
+      struct tm end_tm {};
+      if (gmtime_r(&start, &start_tm) == nullptr || gmtime_r(&end, &end_tm) == nullptr) {
+        ESP_LOGW(TAG, "Could not format holiday timestamps");
+        this->publish_text_(kHolidayState, "Dates illisibles");
+        break;
+      }
+      char text[48];
+      snprintf(text, sizeof(text), "%04d-%02d-%02d %02d:%02d → %04d-%02d-%02d %02d:%02d", start_tm.tm_year + 1900,
+               start_tm.tm_mon + 1, start_tm.tm_mday, start_tm.tm_hour, start_tm.tm_min, end_tm.tm_year + 1900,
+               end_tm.tm_mon + 1, end_tm.tm_mday, end_tm.tm_hour, end_tm.tm_min);
+      this->publish_text_(kHolidayState, text);
       break;
     }
     case ::frisquet::ReadKind::kHotWaterMode: {

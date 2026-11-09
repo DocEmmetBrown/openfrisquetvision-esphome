@@ -12,6 +12,8 @@ constexpr uint8_t kIdZone2 = 0x09;
 constexpr uint8_t kIdZone3 = 0x0A;
 constexpr uint8_t kIdOutdoorProbe = 0x20;
 constexpr uint8_t kIdConnect = 0x7E;
+constexpr uint16_t kAddrHoliday = 0xA0F0;
+constexpr uint16_t kHolidayWords = 0x0D;
 
 enum MessageType : uint8_t { kRead = 0x03, kInit = 0x17, kAssociation = 0x41 };
 
@@ -43,6 +45,19 @@ inline bool parse_header(const uint8_t *data, size_t length, Header &out) {
 
 inline uint16_t be16(const uint8_t *p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
 inline int16_t be16s(const uint8_t *p) { return static_cast<int16_t>(be16(p)); }
+
+inline void encode_holiday_timestamp(uint32_t timestamp, uint8_t *out) {
+  // The boiler stores 32-bit timestamps low word first, with each 16-bit word big-endian.
+  out[0] = static_cast<uint8_t>(timestamp >> 8);
+  out[1] = static_cast<uint8_t>(timestamp);
+  out[2] = static_cast<uint8_t>(timestamp >> 24);
+  out[3] = static_cast<uint8_t>(timestamp >> 16);
+}
+
+inline uint32_t decode_holiday_timestamp(const uint8_t *data) {
+  return (static_cast<uint32_t>(data[2]) << 24) | (static_cast<uint32_t>(data[3]) << 16) |
+         (static_cast<uint32_t>(data[0]) << 8) | data[1];
+}
 
 // Temperatures are signed big-endian tenths of a degree. The boiler reports 127.0 and 129.0
 // when a sensor is absent; both are mapped to NaN.

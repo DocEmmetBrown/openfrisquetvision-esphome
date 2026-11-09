@@ -72,6 +72,7 @@ class ConnectEngine {
     enqueue_(ReadKind::kConsumption);
     enqueue_(ReadKind::kAnnualConsumption);
     enqueue_(ReadKind::kHotWaterMode);
+    enqueue_(ReadKind::kHoliday);
   }
 
   // Ask for a hot-water mode change. Refused while another write is under way, and until a read of
@@ -89,6 +90,22 @@ class ConnectEngine {
   HotWaterMode requested_hot_water_mode() const { return requested_mode_; }
   HotWaterMode hot_water_mode() const { return hot_water_mode_; }
   bool hot_water_mode_known() const { return hot_water_known_; }
+
+  bool request_holiday(uint32_t start, uint32_t end) {
+    if (((start == 0) != (end == 0)) || (start && end <= start) || ((start || end) && !holiday_known_) ||
+        zone_write_pending() ||
+        write_state_ == WriteState::kQueued || write_state_ == WriteState::kSending ||
+        write_state_ == WriteState::kAcked || holiday_write_state_ == WriteState::kQueued ||
+        holiday_write_state_ == WriteState::kSending || holiday_write_state_ == WriteState::kAcked)
+      return false;
+    requested_holiday_start_ = start;
+    requested_holiday_end_ = end;
+    holiday_write_state_ = WriteState::kQueued;
+    return true;
+  }
+  WriteState holiday_write_state() const { return holiday_write_state_; }
+  bool holiday_known() const { return holiday_known_; }
+  const HolidayBlock &holiday() const { return holiday_; }
 
   // Zone blocks: learned from the relays the boiler sends us (the block cannot be read back).
   bool zone_block_known(uint8_t zone_index) const { return zone_index < 3 && zone_known_[zone_index]; }
@@ -244,6 +261,12 @@ class ConnectEngine {
           hot_water_frame_bits_ = raw & 0x81;
           hot_water_known_ = true;
         }
+        HolidayBlock holiday;
+        if (decode_holiday_values(payload + 11, 2 * kHolidayWords, holiday)) {
+          holiday_ = holiday;
+          holiday_known_ = true;
+          enqueue_front_(ReadKind::kHoliday);
+        }
       }
       return false;
     }
@@ -333,6 +356,12 @@ class ConnectEngine {
         enqueue_front_(ReadKind::kHotWaterMode);
         return false;
       }
+      if (holiday_writing_) {
+        holiday_writing_ = false;
+        holiday_write_state_ = WriteState::kAcked;
+        enqueue_front_(ReadKind::kHoliday);
+        return false;
+      }
       result.kind = current_kind_;
       if (current_kind_ == ReadKind::kExplore) {
         result.address = explore_address_;
@@ -362,6 +391,19 @@ class ConnectEngine {
         } else if (write_state_ == WriteState::kAcked) {
           write_state_ = WriteState::kFailed;
           ++stats_.writes_failed;
+        }
+      }
+      if (result.kind == ReadKind::kHoliday) {
+        HolidayBlock decoded;
+        if (decode_holiday_block(result.frame, result.length, decoded)) {
+          holiday_ = decoded;
+          holiday_known_ = true;
+          if (holiday_write_state_ == WriteState::kAcked) {
+            const bool same = decoded.start == requested_holiday_start_ && decoded.end == requested_holiday_end_;
+            holiday_write_state_ = same ? WriteState::kVerified : WriteState::kFailed;
+          }
+        } else if (holiday_write_state_ == WriteState::kAcked) {
+          holiday_write_state_ = WriteState::kFailed;
         }
       }
       return true;
@@ -450,6 +492,9 @@ class ConnectEngine {
         writing_ = false;
         write_state_ = WriteState::kFailed;
         ++stats_.writes_failed;
+      } else if (holiday_writing_) {
+        holiday_writing_ = false;
+        holiday_write_state_ = WriteState::kFailed;
       } else {
         ++stats_.reads_failed;
         end_explore_failed_();
@@ -458,6 +503,7 @@ class ConnectEngine {
           write_state_ = WriteState::kFailed;
           ++stats_.writes_failed;
         }
+        if (holiday_write_state_ == WriteState::kAcked) holiday_write_state_ = WriteState::kFailed;
       }
       next_id_ = transaction_.next_message_id();
       transaction_.abort();
@@ -476,10 +522,14 @@ class ConnectEngine {
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
-      if (!writing_ && !zone_writing_) end_explore_failed_();
+      if (!writing_ && !holiday_writing_ && !zone_writing_) end_explore_failed_();
       if (writing_) {
         writing_ = false;
         write_state_ = WriteState::kNotSent;
+      }
+      if (holiday_writing_) {
+        holiday_writing_ = false;
+        holiday_write_state_ = WriteState::kNotSent;
       }
       if (zone_writing_) {
         zone_writing_ = false;
@@ -488,10 +538,14 @@ class ConnectEngine {
       transaction_.abort();
     } else if (tx.verdict != TxVerdict::kSend) {
       ++stats_.blocked;
-      if (!writing_ && !zone_writing_) end_explore_failed_();
+      if (!writing_ && !holiday_writing_ && !zone_writing_) end_explore_failed_();
       if (writing_) {
         writing_ = false;
         write_state_ = WriteState::kNotSent;
+      }
+      if (holiday_writing_) {
+        holiday_writing_ = false;
+        holiday_write_state_ = WriteState::kNotSent;
       }
       if (zone_writing_) {
         zone_writing_ = false;
@@ -753,6 +807,13 @@ class ConnectEngine {
       write_state_ = WriteState::kSending;
       return true;
     }
+    if (holiday_write_state_ == WriteState::kQueued) {
+      transaction_.start_holiday_write(policy_.self_id, policy_.association, next_id_, requested_holiday_start_,
+                                       requested_holiday_end_);
+      holiday_writing_ = true;
+      holiday_write_state_ = WriteState::kSending;
+      return true;
+    }
     // Then a zone write: one burst every kZoneBurstGapMs, each under a new id, until the boiler answers.
     if (zone_state_ == WriteState::kQueued || (zone_state_ == WriteState::kSending && now_ms >= zone_next_burst_ms_)) {
       if (zone_state_ == WriteState::kQueued) {
@@ -775,6 +836,7 @@ class ConnectEngine {
       case ReadKind::kInfo: address = kAddrInfo; words = 0x1C; break;
       case ReadKind::kConsumption: address = kAddrConsumption; words = 0x1C; break;
       case ReadKind::kAnnualConsumption: address = kAddrAnnualConsumption; words = 0x18; break;
+      case ReadKind::kHoliday: address = kAddrHoliday; words = kHolidayWords; break;
       case ReadKind::kHotWaterMode: address = kAddrHotWaterMode; words = 0x01; break;
       case ReadKind::kStatus: address = kAddrStatus; words = 0x15; break;
       case ReadKind::kExplore: address = explore_address_; words = explore_words_; break;
@@ -857,10 +919,16 @@ class ConnectEngine {
   uint8_t next_id_ = 1;
   bool writing_ = false;
   WriteState write_state_ = WriteState::kIdle;
+  WriteState holiday_write_state_ = WriteState::kIdle;
   HotWaterMode requested_mode_ = HotWaterMode::kUnknown;
   HotWaterMode hot_water_mode_ = HotWaterMode::kUnknown;
   uint8_t hot_water_frame_bits_ = 0;
   bool hot_water_known_ = false;
+  HolidayBlock holiday_{};
+  bool holiday_known_ = false;
+  uint32_t requested_holiday_start_ = 0;
+  uint32_t requested_holiday_end_ = 0;
+  bool holiday_writing_ = false;
   bool ack_pending_ = false;
   bool push_ack_pending_ = false;
   uint8_t push_[64] = {};

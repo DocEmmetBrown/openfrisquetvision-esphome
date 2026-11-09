@@ -232,7 +232,25 @@ réponse : 7E 80 <assoc> <id> 81 17 02 00 <mode relu>                         (9
 Les bits `0x81` (« bits de trame », `0x80` ici) doivent être **recopiés tels que lus** dans `A0FC` ; ne pas les inventer : lire
 `A0FC` avant la première écriture. Vérifier l'écriture en relisant `A0FC` (la réponse donne déjà la valeur relue). Délai : < 1 s.
 
-### 6.2 Bloc de zone (48 octets) **[vérifié]**
+### 6.2 Période vacances **[écriture non vérifiée sur chaudière réelle]**
+
+`A0F0 – A0F7` contient les dates de début et de fin, chacune sur 32 bits et dans le même ordre de mots que l'horloge (`mot
+faible d'abord`). Les deux valeurs sont nulles lorsqu'aucune période n'est programmée. L'interface Home Assistant accepte des
+dates/heures locales, encodées comme l'horloge locale de la chaudière (sans appliquer d'offset UTC), et l'activation envoie
+seulement ces quatre mots, sans réécrire le reste du bloc `A0F0 – A104` :
+
+```
+80 7E <assoc> <id> 01 17 A0 F0 00 04 A0 F0 00 04 08 00 <début:4> <fin:4>
+```
+
+Cette forme est déduite de l'échange `17` général et de l'encodage observé, mais **la trame d'écriture vacances et son effet
+sur le chauffage / l'ECS n'ont pas encore été capturés sur une chaudière réelle**. Après l'accusé, l'implémentation relit
+`A0F0 × 0D` et ne déclare l'opération vérifiée que si les deux valeurs correspondent. Deux zéros annulent la période.
+Les notices Frisquet décrivent le mode vacances comme hors-gel sur chaque zone et arrêt de l'ECS ; l'effet réel de cette
+écriture, l'interprétation été/hiver et le comportement exact à l'instant de début/fin restent à confirmer. Effectuer d'abord
+un essai contrôlé avec une courte période et surveiller la chaudière.
+
+### 6.3 Bloc de zone (48 octets) **[vérifié]**
 
 | Octet | Champ | Codage |
 |---|---|---|
@@ -425,7 +443,7 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 | `79E0 – 7A4F` | `79E0` et `79FC` : instantanés (`79EC` = `0320`, 80,0 constant : une consigne, pas l'ECS instantanée) ; `79F2` (7.1) ; **`7A16 – 7A17` horloge** : heure Unix sur 32 bits, **mot faible d'abord**, heure locale codée comme UTC ; `7A18` consommations ; **`7A30 – 7A33` appareils appairés** : deux fois (index, adresse) puis version BCD, ici `0308 2700 FF7E FFFF` = satellite `08` V27.00, Connect `7E` sans version (même après une association avec version, 3.3) ; reste `FFFF` |
 | `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure en direct, état et jour, NetworkID, `0080` |
 | `A029 – A09B` | `A029` page d'état (7.2) ; `A041` copie décalée ; **`A05E` corps de chauffe en direct** ; `A063 – A09A` consommations |
-| `A0F0 – A104` | `A0F8 – A0F9` identifiant `AE80 66D3` ; **`A0FC` mode ECS** |
+| `A0F0 – A104` | **`A0F0 – A0F7` début / fin des vacances** (deux horodatages 32 bits, mot faible d'abord ; interprétation [hypothèse]) ; `A0F8 – A0F9` identifiant `AE80 66D3` ; **`A0FC` mode ECS** |
 
 ---
 

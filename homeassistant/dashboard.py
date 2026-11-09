@@ -19,7 +19,7 @@ import pathlib
 import re
 import sys
 
-ENTITY = re.compile(r"\b(climate|sensor|binary_sensor|select|switch|number|button|text)\.frisquet_([a-z0-9_]+)")
+ENTITY = re.compile(r"\b(climate|sensor|binary_sensor|select|switch|number|button|datetime|text)\.frisquet_([a-z0-9_]+)")
 
 
 def main() -> None:

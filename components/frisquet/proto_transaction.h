@@ -55,6 +55,14 @@ class ReadTransaction {
     frame_bits_ = frame_bits;
   }
 
+  void start_holiday_write(uint8_t self_id, uint8_t association, uint8_t message_id, uint32_t start_timestamp,
+                           uint32_t end_timestamp) {
+    start(self_id, association, message_id, 0, 0);
+    kind_ = Kind::kHolidayWrite;
+    holiday_start_ = start_timestamp;
+    holiday_end_ = end_timestamp;
+  }
+
   // A consigne exchange in a satellite name: self_id is the zone id, the answer is the boiler state page.
   void start_satellite_consigne(uint8_t zone_id, uint8_t association, uint8_t first_message_id, const uint8_t *data) {
     start(zone_id, association, first_message_id, 0, 0);
@@ -106,6 +114,9 @@ class ReadTransaction {
       case Kind::kHotWaterWrite:
         length = build_hot_water_mode_write(frame, capacity, self_id_, association_, message_id_, mode_, frame_bits_);
         break;
+      case Kind::kHolidayWrite:
+        length = build_holiday_write(frame, capacity, self_id_, association_, message_id_, holiday_start_, holiday_end_);
+        break;
       case Kind::kSatelliteConsigne:
         length = build_satellite_consigne(frame, capacity, self_id_, association_, message_id_, block_);
         break;
@@ -154,12 +165,14 @@ class ReadTransaction {
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
-  enum class Kind : uint8_t { kRead, kHotWaterWrite, kZoneWrite, kSatelliteConsigne, kSatelliteBlock };
+  enum class Kind : uint8_t { kRead, kHotWaterWrite, kHolidayWrite, kZoneWrite, kSatelliteConsigne, kSatelliteBlock };
   State state_ = State::kIdle;
   Kind kind_ = Kind::kRead;
   uint8_t connect_id_ = kIdConnect;
   HotWaterMode mode_ = HotWaterMode::kUnknown;
   uint8_t frame_bits_ = 0;
+  uint32_t holiday_start_ = 0;
+  uint32_t holiday_end_ = 0;
   uint8_t self_id_ = kIdConnect;
   uint8_t association_ = 0xFF;
   uint8_t message_id_ = 0;

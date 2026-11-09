@@ -104,6 +104,25 @@ inline size_t build_zone_write(uint8_t *out, size_t capacity, uint8_t requester,
 //   80 <self> <assoc> <id> 01 17 A0 FC 00 01 A0 FC 00 01 02 00 <mode byte>
 // The mode byte is the mode (bits 0x7E) plus the frame bits (0x81) last read from the boiler.
 constexpr size_t kHotWaterModeWriteLength = 17;
+constexpr size_t kHolidayWriteLength = 24;
+
+inline size_t build_holiday_write(uint8_t *out, size_t capacity, uint8_t requester, uint8_t association,
+                                  uint8_t message_id, uint32_t start, uint32_t end) {
+  if (!out || capacity < kHolidayWriteLength || ((start == 0) != (end == 0)) || (start && end <= start)) return 0;
+  Header h;
+  h.destination = kIdBoiler;
+  h.source = requester;
+  h.association = association;
+  h.message_id = message_id;
+  h.reception = 0x01;
+  h.type = kInit;
+  write_header(out, h);
+  static const uint8_t kBody[10] = {0xA0, 0xF0, 0x00, 0x04, 0xA0, 0xF0, 0x00, 0x04, 0x08, 0x00};
+  memcpy(out + 6, kBody, sizeof(kBody));
+  encode_holiday_timestamp(start, out + 16);
+  encode_holiday_timestamp(end, out + 20);
+  return kHolidayWriteLength;
+}
 
 inline bool is_valid_hot_water_mode(uint8_t mode_bits) {
   switch (mode_bits) {

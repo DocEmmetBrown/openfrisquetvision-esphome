@@ -26,7 +26,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck, kSatelliteBlock };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kHolidayWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck, kSatelliteBlock };
 
 // Which parts of a zone block a write may change; everything else must equal the last known block.
 constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
@@ -179,6 +179,9 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
   } else if (header.type == kInit && length == kZoneWriteLength) {
     if (header.reception < kIdZone1 || header.reception > kIdZone3) return TxVerdict::kMalformed;
     cls = TxClass::kZoneWrite;
+  } else if (header.type == kInit && length == kHolidayWriteLength) {
+    if (header.reception != 0x01) return TxVerdict::kMalformed;
+    cls = TxClass::kHolidayWrite;
   } else if (header.type == kInit) {
     if (length != kHotWaterModeWriteLength || header.reception != 0x01) return TxVerdict::kMalformed;
     cls = TxClass::kHotWaterWrite;
@@ -206,6 +209,13 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     // Exactly the write the MQTT firmware sends, with a known hot-water mode: nothing else.
     static const uint8_t kBody[10] = {0xA0, 0xFC, 0x00, 0x01, 0xA0, 0xFC, 0x00, 0x01, 0x02, 0x00};
     if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0 || !is_valid_hot_water_mode(frame[16] & 0x7E))
+      return TxVerdict::kBlockedAddress;
+    if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
+  } else if (cls == TxClass::kHolidayWrite) {
+    static const uint8_t kBody[10] = {0xA0, 0xF0, 0x00, 0x04, 0xA0, 0xF0, 0x00, 0x04, 0x08, 0x00};
+    const uint32_t start = decode_holiday_timestamp(frame + 16);
+    const uint32_t end = decode_holiday_timestamp(frame + 20);
+    if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0 || ((start == 0) != (end == 0)) || (start && end <= start))
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
   } else {

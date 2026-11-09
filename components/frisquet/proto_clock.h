@@ -20,6 +20,21 @@ inline int32_t days_from_civil(int32_t y, uint32_t m, uint32_t d) {
   return era * 146097 + static_cast<int32_t>(doe) - 719468;
 }
 
+inline bool civil_to_timestamp(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second,
+                               uint32_t &timestamp) {
+  // Tentatively mirror the boiler clock's local-as-UTC representation; holiday timezone semantics are unverified.
+  if (year < 2020 || year > 2105 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  static const uint8_t month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+  const uint8_t max_day = month == 2 && leap ? 29 : month_days[month - 1];
+  if (day < 1 || day > max_day) return false;
+  const uint64_t value = static_cast<uint64_t>(days_from_civil(year, month, day)) * 86400u +
+                         static_cast<uint32_t>(hour) * 3600u + static_cast<uint32_t>(minute) * 60u + second;
+  if (value == 0 || value > UINT32_MAX) return false;
+  timestamp = static_cast<uint32_t>(value);
+  return true;
+}
+
 class BoilerClock {
  public:
   // BCD fields as broadcast: year is YY (20YY). Returns false when the date is implausible.

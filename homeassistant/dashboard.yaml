@@ -46,6 +46,18 @@ views:
             name: État
           - entity: binary_sensor.frisquet_chaudiere_bruleur
             name: Brûleur
+          - entity: sensor.frisquet_chaudiere_vacances_etat
+            name: Vacances programmées
+          - entity: datetime.frisquet_chaudiere_vacances_debut
+            name: Début
+          - entity: datetime.frisquet_chaudiere_vacances_fin
+            name: Fin
+          - entity: button.frisquet_chaudiere_activer_les_vacances
+            name: Activer la période choisie
+          - entity: button.frisquet_chaudiere_annuler_les_vacances
+            name: Annuler les vacances
+          - entity: sensor.frisquet_chaudiere_vacances_ecriture
+            name: État de la commande
           - entity: select.frisquet_chaudiere_mode_ecs
             name: Eau chaude
           - entity: sensor.frisquet_chaudiere_eau_chaude
