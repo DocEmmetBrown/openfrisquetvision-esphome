@@ -721,10 +721,26 @@ static void test_holiday_write_frame_and_gate() {
   const uint32_t start = 0x66D3AE80u;
   const uint32_t end = start + 3600;
   const size_t n = build_holiday_write(out, sizeof(out), kIdConnect, 0xE3, 0x01, start, end);
-  const uint8_t expected[kHolidayWriteLength] = {0x80, 0x7E, 0xE3, 0x01, 0x01, 0x17, 0xA0, 0xF0,
-                                                  0x00, 0x04, 0xA0, 0xF0, 0x00, 0x04, 0x08, 0x00,
-                                                  0xAE, 0x80, 0x66, 0xD3, 0xBC, 0x90, 0x66, 0xD3};
+  const uint8_t expected[] = {0x80, 0x7E, 0xE3, 0x01, 0x01, 0x17, 0xA0, 0xF0,
+                                                  0x00, 0x08, 0xA0, 0xF0, 0x00, 0x08, 0x10,
+                                                  0xAE, 0x80, 0x66, 0xD3, 0, 0, 0, 0,
+                                                  0xBC, 0x90, 0x66, 0xD3, 0, 0, 0, 0};
   CHECK(n == sizeof(expected) && memcmp(out, expected, n) == 0);
+  CHECK(n == 15u + out[14]);
+  uint8_t padded[24];
+  memcpy(padded, expected, 15);
+  padded[15] = 0;
+  memcpy(padded + 16, expected + 15, 8);
+  padded[9] = padded[13] = 4;
+  padded[14] = 8;
+  CHECK(evaluate_tx(engine_policy(TxLevel::kWrite, false), padded, sizeof(padded)) == TxVerdict::kMalformed);
+  uint8_t compact[23];
+  memcpy(compact, expected, 15);
+  compact[9] = compact[13] = 4;
+  compact[14] = 8;
+  encode_holiday_timestamp(start, compact + 15);
+  encode_holiday_timestamp(end, compact + 19);
+  CHECK(evaluate_tx(engine_policy(TxLevel::kWrite, false), compact, sizeof(compact)) == TxVerdict::kMalformed);
   CHECK(build_holiday_write(out, kHolidayWriteLength - 1, kIdConnect, 0xE3, 1, start, end) == 0);
   CHECK(build_holiday_write(out, sizeof(out), kIdConnect, 0xE3, 1, 0, end) == 0);
   CHECK(build_holiday_write(out, sizeof(out), kIdConnect, 0xE3, 1, end, start) == 0);
@@ -742,7 +758,13 @@ static void test_holiday_write_frame_and_gate() {
   bad[7] = 0xF1;
   CHECK(evaluate_tx(policy, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
   memcpy(bad, expected, sizeof(bad));
-  memset(bad + 20, 0, 4);
+  memset(bad + 23, 0, 4);
+  CHECK(evaluate_tx(policy, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  bad[19] = 1;
+  CHECK(evaluate_tx(policy, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
+  memcpy(bad, expected, sizeof(bad));
+  bad[27] = 1;
   CHECK(evaluate_tx(policy, bad, sizeof(bad)) == TxVerdict::kBlockedAddress);
   policy.kill_switch = true;
   CHECK(evaluate_tx(policy, expected, sizeof(expected)) == TxVerdict::kBlockedKillSwitch);
@@ -755,10 +777,18 @@ static void test_holiday_write_frame_and_gate() {
   reply[5] = kRead;
   reply[6] = 2 * kHolidayWords;
   encode_holiday_timestamp(start, reply.data() + 7);
-  encode_holiday_timestamp(end, reply.data() + 11);
+  encode_holiday_timestamp(end, reply.data() + 15);
   HolidayBlock decoded;
   CHECK(decode_holiday_block(reply.data(), reply.size(), decoded));
-  CHECK(decoded.start == start && decoded.end == end);
+  CHECK(decoded.valid && decoded.start == start && decoded.end == end);
+  reply[11] = 1;
+  CHECK(decode_holiday_block(reply.data(), reply.size(), decoded) && !decoded.valid);
+  CHECK(!decode_holiday_values(reply.data() + 7, 8, decoded));
+  const Bytes captured = {0x7E, 0x80, 0x21, 0xF9, 0x81, 0x03, 0x1A,
+                          0x00, 0xCD, 0xD4, 0x6A, 0xF2, 0x91, 0x00, 0x6A,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0xAE, 0x80, 0x66, 0xD3, 0, 0, 0, 0, 0, 0x90};
+  CHECK(decode_holiday_block(captured.data(), captured.size(), decoded));
+  CHECK(!decoded.valid && decoded.start == 3563716813u && decoded.end == 0);
 }
 
 static Bytes with_id(const Bytes &frame, uint8_t id) {
@@ -777,7 +807,15 @@ static Bytes holiday_read_response(uint8_t id, uint32_t start, uint32_t end) {
   frame[5] = frisquet::kRead;
   frame[6] = 2 * frisquet::kHolidayWords;
   frisquet::encode_holiday_timestamp(start, frame.data() + 7);
-  frisquet::encode_holiday_timestamp(end, frame.data() + 11);
+  frisquet::encode_holiday_timestamp(end, frame.data() + 15);
+  return frame;
+}
+
+static Bytes holiday_write_response(uint8_t id, uint32_t start, uint32_t end) {
+  Bytes frame = holiday_read_response(id, start, end);
+  frame.resize(23);
+  frame[5] = frisquet::kInit;
+  frame[6] = 16;
   return frame;
 }
 
@@ -905,7 +943,7 @@ static void test_engine_holiday_write() {
   CHECK(!engine.request_holiday(1, 2));
   ConnectEngine clear_unknown;
   clear_unknown.set_policy(engine_policy(TxLevel::kWrite, false));
-  CHECK(clear_unknown.request_holiday(0, 0));
+  CHECK(!clear_unknown.request_holiday(0, 0));
   engine.request_initial_reads();
   uint32_t now = 0;
   const char *answers[] = {"payload_79f2_idle", "payload_7a18", "payload_a063", "payload_a0fc"};
@@ -928,9 +966,9 @@ static void test_engine_holiday_write() {
   CHECK(!engine.request_holiday(0, 0));
   now += 100;
   CHECK(engine.poll(now, tx) && tx.kind == TxClass::kHolidayWrite && tx.verdict == TxVerdict::kSend);
-  CHECK(decode_holiday_timestamp(tx.frame + 16) == start && decode_holiday_timestamp(tx.frame + 20) == end);
+  CHECK(decode_holiday_timestamp(tx.frame + 15) == start && decode_holiday_timestamp(tx.frame + 23) == end);
   const uint8_t write_id = tx.frame[3];
-  const Bytes ack = {kIdConnect, kIdBoiler, 0xE3, write_id, 0x81, kInit, 0x02, 0x00, 0x00};
+  const Bytes ack = holiday_write_response(write_id, start, end);
   CHECK(!engine.on_frame(now + 50, ack.data(), ack.size(), result));
   CHECK(engine.holiday_write_state() == WriteState::kAcked);
   now += 100;
@@ -944,7 +982,7 @@ static void test_engine_holiday_write() {
   now += 100;
   CHECK(engine.poll(now, tx) && tx.kind == TxClass::kHolidayWrite);
   const uint8_t cancel_id = tx.frame[3];
-  const Bytes cancel_ack = {kIdConnect, kIdBoiler, 0xE3, cancel_id, 0x81, kInit, 0x02, 0x00, 0x00};
+  const Bytes cancel_ack = holiday_write_response(cancel_id, 0, 0);
   CHECK(!engine.on_frame(now + 50, cancel_ack.data(), cancel_ack.size(), result));
   now += 100;
   CHECK(engine.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
@@ -952,6 +990,42 @@ static void test_engine_holiday_write() {
   CHECK(engine.on_frame(now + 50, canceled.data(), canceled.size(), result));
   CHECK(engine.holiday_write_state() == WriteState::kVerified);
   CHECK(engine.holiday().start == 0 && engine.holiday().end == 0);
+
+  engine.request_initial_reads();
+  for (const char *name : answers) {
+    now += 100;
+    CHECK(engine.poll(now, tx));
+    const Bytes answer = with_id(F[name], tx.frame[3]);
+    CHECK(engine.on_frame(now + 50, answer.data(), answer.size(), result));
+  }
+  now += 100;
+  CHECK(engine.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
+  Bytes malformed = holiday_read_response(tx.frame[3], 0, 0);
+  malformed[11] = 1;
+  CHECK(engine.on_frame(now + 50, malformed.data(), malformed.size(), result));
+  CHECK(engine.holiday_known() && !engine.holiday().valid);
+  CHECK(engine.request_holiday(0, 0));
+  now += 100;
+  CHECK(engine.poll(now, tx) && tx.kind == TxClass::kHolidayWrite);
+  const Bytes recovery_ack = holiday_write_response(tx.frame[3], 0, 0);
+  CHECK(!engine.on_frame(now + 50, recovery_ack.data(), recovery_ack.size(), result));
+  now += 100;
+  CHECK(engine.poll(now, tx) && be16(tx.frame + 6) == kAddrHoliday);
+  malformed[3] = tx.frame[3];
+  CHECK(engine.on_frame(now + 50, malformed.data(), malformed.size(), result));
+  CHECK(engine.holiday_write_state() == WriteState::kFailed);
+
+  const Bytes expired_push = {
+      kIdConnect, kIdBoiler, 0xE3, 0x80, 0x05, 0x10, 0xA0, 0xF0, 0, 0x0D, 0x1A,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xAE, 0x80, 0x66, 0xD3, 0, 0, 0, 0, 0, 0x90};
+  now += 100;
+  CHECK(!engine.on_frame(now, expired_push.data(), expired_push.size(), result));
+  CHECK(engine.holiday_known() && engine.holiday().valid && engine.holiday().start == 0 && engine.holiday().end == 0);
+  CHECK(engine.poll(now + 1, tx) && tx.kind == TxClass::kPushAck);
+  CHECK(engine.poll(now + 2, tx) && be16(tx.frame + 6) == kAddrHoliday);
+  const Bytes expired = holiday_read_response(tx.frame[3], 0, 0);
+  CHECK(engine.on_frame(now + 50, expired.data(), expired.size(), result) && result.kind == ReadKind::kHoliday);
+  CHECK(engine.hot_water_mode() == HotWaterMode::kEcoScheduled);
 }
 
 static void test_zone_write() {
@@ -2611,6 +2685,184 @@ static void test_burner() {
   CHECK(ce.clock().known() && ce.clock().seconds(180200) % 600 == 12);  // 22:10:12 -> 12 s into the cycle
 }
 
+static void test_zone_profiles() {
+  using namespace frisquet;
+  const Bytes &known = F["payload_zone_relay_live"];
+  const uint8_t *reference = known.data() + 15;
+  uint8_t program[kProgramSize];
+  memset(program, 0xA5, sizeof(program));
+  TxPolicy policy = engine_policy(TxLevel::kWrite, false);
+  policy.zone_write_mask = kZoneFieldProgram | kZoneFieldSetpoints | kZoneFieldMode;
+  for (uint8_t mode = 5; mode <= 8; ++mode) {
+    ConnectEngine engine;
+    engine.set_policy(policy);
+    engine.set_next_message_id(0x55);
+    ReadResult result;
+    Bytes relay = known;
+    relay[18] = mode;
+    relay[19] = mode == 5 ? 0x25 : mode == 6 ? 0x21 : mode == 7 ? 0x20 : 0x30;
+    engine.on_frame(0, relay.data(), relay.size(), result);
+    CHECK(engine.request_zone_profile(0, program, 155, 120, 30));  // 20.5 / 17 / 8 C
+    CHECK(!engine.request_zone_profile(0, program, 150, 110, 30));  // no overlapping profile writes
+    TxRequest tx;
+    bool sent = false;
+    for (uint32_t t = 180000; t < 185000; t += 100) {
+      if (engine.poll(t, tx) && tx.kind == TxClass::kZoneWrite) { sent = true; break; }
+    }
+    CHECK(sent && tx.verdict == TxVerdict::kSend);
+    CHECK(tx.frame[15] == 155 && tx.frame[16] == 120 && tx.frame[17] == 30);
+    CHECK(memcmp(tx.frame + 18, relay.data() + 18, 3) == 0);
+    CHECK(memcmp(tx.frame + 21, program, sizeof(program)) == 0);
+    Bytes ack(55);
+    const uint8_t head[] = {0x7E, 0x80, policy.association, tx.frame[3], 0x88, 0x17, 0x30};
+    memcpy(ack.data(), head, sizeof(head));
+    memcpy(ack.data() + 7, tx.frame + 15, kZoneBlockSize);
+    engine.on_frame(185100, ack.data(), ack.size(), result);
+    CHECK(engine.zone_write_state() == WriteState::kVerified);
+    CHECK(memcmp(engine.zone_block(0), tx.frame + 15, kZoneBlockSize) == 0);
+  }
+  ConnectEngine unknown;
+  unknown.set_policy(policy);
+  CHECK(!unknown.request_zone_profile(0, program, 150, 120, 30));
+  ConnectEngine engine;
+  engine.set_policy(policy);
+  ReadResult result;
+  engine.on_frame(0, known.data(), known.size(), result);
+  CHECK(!engine.request_zone_profile(3, program, 150, 120, 30));
+  CHECK(!engine.request_zone_profile(0, nullptr, 150, 120, 30));
+  CHECK(!engine.request_zone_profile(0, program, 151, 120, 30));
+  CHECK(!engine.request_zone_profile(0, program, 150, 155, 30));
+  CHECK(!engine.request_zone_profile(0, program, 150, 120, 125));
+  CHECK(!engine.request_zone_profile(0, program, 150, 120, 105));
+  for (int test = 0; test < 4; ++test) {
+    auto blocked = policy;
+    if (test == 0) blocked.kill_switch = true;
+    if (test == 1) blocked.dry_run = true;
+    if (test == 2) blocked.level = TxLevel::kAck;
+    if (test == 3) blocked.zone_write_mask = kZoneFieldProgram;
+    engine.set_policy(blocked);
+    CHECK(!engine.request_zone_profile(0, program, 150, 120, 30));
+  }
+  engine.set_policy(policy);
+  Bytes boost = known;
+  boost[19] |= 0x40;
+  engine.on_frame(0, boost.data(), boost.size(), result);
+  CHECK(!engine.request_zone_profile(0, program, 150, 120, 30));
+  CHECK(memcmp(reference + 6, engine.zone_block(0) + 6, kProgramSize) == 0);
+}
+
+static void test_outdoor_sensor() {
+  using namespace frisquet;
+  const uint8_t network[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+  Bytes offer = {0x20, 0x80, 0x1B, 0x12, 0x01, 0x41, 0x04, 0xAA, 0xBB, 0xCC, 0xDD};
+  CHECK(outdoor_offer_allowed(offer.data(), offer.size(), network));
+  offer[0] = 0x7E;
+  CHECK(!outdoor_offer_allowed(offer.data(), offer.size(), network));
+  offer[0] = 0x20;
+  offer[7] ^= 1;
+  CHECK(!outdoor_offer_allowed(offer.data(), offer.size(), network));
+  offer[7] ^= 1;
+  PairingSession pairing;
+  CHECK(pairing.start(PairingKind::kAssociate, kIdOutdoorSensor, network, 0));
+  const uint8_t version[4] = {1, 0x21, 1, 2};
+  pairing.set_confirm_payload(version);
+  CHECK(pairing.on_frame(1, offer.data(), offer.size()));
+  uint8_t confirm[10];
+  size_t confirm_length;
+  CHECK(pairing.poll(1, confirm, confirm_length));
+  CHECK(confirm[1] == 0x20 && memcmp(confirm + 6, version, 4) == 0);
+  OutdoorSample sample;
+  CHECK(!sample.usable(0));
+  CHECK(!sample.update(NAN, 0, 0));
+  CHECK(!sample.update(INFINITY, 0, 0));
+  CHECK(!sample.update(-40.1f, 0, 0));
+  CHECK(!sample.update(60.1f, 0, 0));
+  CHECK(!sample.update(10, -1, 0));
+  CHECK(!sample.update(10, 10800, 0));
+  CHECK(sample.update(-2, 0, 1000));
+  CHECK(sample.temperature() == -20 && sample.usable(1000));
+  CHECK(!sample.stale(1000 + kOutdoorStaleMs - 1));
+  CHECK(sample.stale(1000 + kOutdoorStaleMs));
+  CHECK(sample.usable(1000 + kOutdoorExpiryMs - 1));
+  CHECK(!sample.usable(1000 + kOutdoorExpiryMs));
+  sample.tick(1000 + kOutdoorExpiryMs);
+  CHECK(!sample.usable(1000));  // Expiry stays latched across clock wrap until a new sample.
+  CHECK(sample.update(12.34f, 179, 0xFFFFFF00));
+  CHECK(sample.temperature() == 123 && sample.usable(0x00000300));
+  CHECK(sample.stale(0x00000300));
+  CHECK(sample.update(12, 10799, 0));
+  CHECK(!sample.usable(1000));  // Receiving old data never resets its real age.
+
+  uint8_t frame[32];
+  CHECK(build_outdoor_write(frame, sizeof(frame), 0x1B, 0x42, -20) == 17);
+  const Bytes expected = {0x80, 0x20, 0x1B, 0x42, 0x01, 0x17, 0x9C, 0x54, 0x00, 0x04,
+                          0xA0, 0x29, 0x00, 0x01, 0x02, 0xFF, 0xEC};
+  CHECK(memcmp(frame, expected.data(), expected.size()) == 0);
+  TxPolicy policy = engine_policy(TxLevel::kWrite, false);
+  policy.outdoor_association = 0x1B;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kBlockedLevel);
+  policy.outdoor_enabled = true;
+  TxClass cls;
+  CHECK(evaluate_tx(policy, frame, 17, nullptr, 0, &cls) == TxVerdict::kSend);
+  CHECK(cls == TxClass::kOutdoorWrite);
+  frame[11] ^= 1;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kBlockedAddress);
+  frame[11] ^= 1;
+  frame[15] = 0x7F;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kBlockedAddress);
+  frame[15] = 0xFF;
+  policy.kill_switch = true;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kBlockedKillSwitch);
+  policy.kill_switch = false;
+  policy.level = TxLevel::kRead;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kBlockedLevel);
+  policy.level = TxLevel::kWrite;
+  policy.outdoor_association = 0xFF;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kBlockedIdentity);
+  policy.outdoor_association = 0x1B;
+  policy.dry_run = true;
+  CHECK(evaluate_tx(policy, frame, 17) == TxVerdict::kDryRun);
+  policy.dry_run = false;
+
+  ReadTransaction transaction;
+  transaction.start_outdoor(0x1B, 0x42, -20);
+  size_t length;
+  CHECK(transaction.poll(240000, frame, sizeof(frame), length) == ReadTransaction::Action::kSend);
+  CHECK(length == 17 && memcmp(frame, expected.data(), 17) == 0);
+  Bytes reply = {0x20, 0x80, 0x1B, 0x42, 0x81, 0x17, 8, 0, 0, 0, 0, 0, 0, 0, 0};
+  CHECK(!transaction.on_frame(reply.data(), 7));
+  reply[2] ^= 1;
+  CHECK(!transaction.on_frame(reply.data(), reply.size()));
+  reply[2] ^= 1;
+  CHECK(transaction.on_frame(reply.data(), reply.size()));
+
+  ConnectEngine engine;
+  engine.set_policy(policy);
+  engine.set_next_message_id(0x42);
+  CHECK(engine.outdoor_sample().update(-2, 0, 240000));
+  TxRequest tx;
+  CHECK(engine.poll(240000, tx) && tx.kind == TxClass::kOutdoorWrite && tx.verdict == TxVerdict::kSend);
+  CHECK(memcmp(tx.frame, expected.data(), 17) == 0);
+  ReadResult result;
+  CHECK(!engine.on_frame(240100, reply.data(), reply.size(), result));
+  CHECK(engine.outdoor_confirmed() && engine.outdoor_last_ok_ms() == 240100);
+
+  ConnectEngine stopped;
+  stopped.set_policy(policy);
+  CHECK(stopped.outdoor_sample().update(10, 10799, 240000));
+  CHECK(stopped.poll(240000, tx) && tx.kind == TxClass::kOutdoorWrite);
+  CHECK(!stopped.outdoor_tx_allowed(241000));
+  const bool sent = stopped.poll(242200, tx);
+  CHECK(!sent || tx.kind != TxClass::kOutdoorWrite || tx.verdict != TxVerdict::kSend);
+
+  ConnectEngine disabled;
+  policy.outdoor_enabled = false;
+  disabled.set_policy(policy);
+  CHECK(disabled.outdoor_sample().update(10, 0, 240000));
+  CHECK(!disabled.outdoor_tx_allowed(240000));
+  CHECK(disabled.poll(240000, tx) && tx.kind != TxClass::kOutdoorWrite);
+}
+
 int main() {
   F = load_fixtures();
   test_header();
@@ -2644,6 +2896,8 @@ int main() {
   test_crc_valid_and_invalid();
   test_pairing();
   test_burner();
+  test_outdoor_sensor();
+  test_zone_profiles();
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures ? 1 : 0;
 }

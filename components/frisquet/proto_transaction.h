@@ -80,6 +80,12 @@ class ReadTransaction {
     memcpy(block_, block, kZoneBlockSize);
   }
 
+  void start_outdoor(uint8_t association, uint8_t id, int16_t temperature) {
+    start(kIdOutdoorSensor, association, id, 0, 0);
+    kind_ = Kind::kOutdoor;
+    outdoor_temperature_ = temperature;
+  }
+
   bool active() const { return state_ == State::kRunning; }
   void abort() { state_ = State::kIdle; }
   bool done() const { return state_ == State::kDone; }
@@ -108,6 +114,9 @@ class ReadTransaction {
       sends_ = 0;
     }
     switch (kind_) {
+      case Kind::kOutdoor:
+        length = build_outdoor_write(frame, capacity, association_, message_id_, outdoor_temperature_);
+        break;
       case Kind::kRead:
         length = build_read_request(frame, capacity, self_id_, association_, message_id_, address_, size_words_);
         break;
@@ -153,6 +162,7 @@ class ReadTransaction {
       return false;
     }
     if (h.type != reply_type) return false;
+    if (kind_ == Kind::kOutdoor && (length != 15 || frame[6] != 8)) return false;
     if (length > sizeof(answer_)) return false;
     memcpy(answer_, frame, length);
     answer_length_ = length;
@@ -165,7 +175,8 @@ class ReadTransaction {
 
  private:
   enum class State : uint8_t { kIdle, kRunning, kDone, kFailed };
-  enum class Kind : uint8_t { kRead, kHotWaterWrite, kHolidayWrite, kZoneWrite, kSatelliteConsigne, kSatelliteBlock };
+  enum class Kind : uint8_t { kRead, kHotWaterWrite, kHolidayWrite, kZoneWrite, kSatelliteConsigne, kSatelliteBlock, kOutdoor };
+  int16_t outdoor_temperature_ = 0;
   State state_ = State::kIdle;
   Kind kind_ = Kind::kRead;
   uint8_t connect_id_ = kIdConnect;

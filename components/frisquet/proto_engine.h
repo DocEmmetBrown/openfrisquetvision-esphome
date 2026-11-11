@@ -65,6 +65,13 @@ class ConnectEngine {
   uint8_t next_message_id() const { return next_id_; }
   const EngineStats &stats() const { return stats_; }
   BoilerClock &clock() { return clock_; }
+  OutdoorSample &outdoor_sample() { return outdoor_sample_; }
+  bool outdoor_tx_allowed(uint32_t now) const {
+    return policy_.outdoor_enabled && policy_.outdoor_association != 0xFF &&
+           policy_.level >= TxLevel::kWrite && !policy_.kill_switch && outdoor_sample_.usable(now);
+  }
+  bool outdoor_confirmed() const { return outdoor_confirmed_; }
+  uint32_t outdoor_last_ok_ms() const { return outdoor_last_ok_ms_; }
 
   // Queue the reads done once at start-up (the MQTT firmware does the same).
   void request_initial_reads() {
@@ -92,7 +99,7 @@ class ConnectEngine {
   bool hot_water_mode_known() const { return hot_water_known_; }
 
   bool request_holiday(uint32_t start, uint32_t end) {
-    if (((start == 0) != (end == 0)) || (start && end <= start) || ((start || end) && !holiday_known_) ||
+    if (((start == 0) != (end == 0)) || (start && end <= start) || !holiday_known_ ||
         zone_write_pending() ||
         write_state_ == WriteState::kQueued || write_state_ == WriteState::kSending ||
         write_state_ == WriteState::kAcked || holiday_write_state_ == WriteState::kQueued ||
@@ -235,6 +242,23 @@ class ConnectEngine {
     memcpy(block + 6, program, 42);
     return request_zone_block(zone_index, block, kZoneFieldProgram);
   }
+  bool request_zone_profile(uint8_t zone_index, const uint8_t *program, uint8_t comfort, uint8_t reduced,
+                            uint8_t frost) {
+    if (zone_index >= 3 || !zone_confirmed_[zone_index] || !program || zone_write_pending() ||
+        policy_.kill_switch || policy_.dry_run || policy_.level < TxLevel::kWrite || policy_.association == 0xFF ||
+        (zone_block_[zone_index][4] & 0x40) || comfort > 250 || reduced > comfort || frost > reduced ||
+        frost > 100 || comfort % 5 || reduced % 5 || frost % 5)
+      return false;
+    uint8_t block[kZoneBlockSize];
+    memcpy(block, zone_block_[zone_index], sizeof(block));
+    block[0] = comfort;
+    block[1] = reduced;
+    block[2] = frost;
+    memcpy(block + 6, program, kProgramSize);
+    const uint8_t fields = kZoneFieldProgram | kZoneFieldSetpoints;
+    if ((policy_.zone_write_mask & fields) != fields) return false;
+    return request_zone_block(zone_index, block, fields);
+  }
   bool request_zone_setpoints(uint8_t zone_index, uint8_t comfort_raw, uint8_t reduced_raw, uint8_t frost_raw) {
     if (zone_index >= 3 || !zone_confirmed_[zone_index]) return false;
     uint8_t block[kZoneBlockSize];
@@ -348,6 +372,12 @@ class ConnectEngine {
     }
     if (transaction_.active() && transaction_.on_frame(payload, length)) {
       next_id_ = transaction_.next_message_id();
+      if (outdoor_writing_) {
+        outdoor_writing_ = false;
+        outdoor_last_ok_ms_ = now_ms;
+        outdoor_confirmed_ = true;
+        return false;
+      }
       if (writing_) {
         // The boiler acknowledged the write: read it back before calling it done.
         writing_ = false;
@@ -399,7 +429,7 @@ class ConnectEngine {
           holiday_ = decoded;
           holiday_known_ = true;
           if (holiday_write_state_ == WriteState::kAcked) {
-            const bool same = decoded.start == requested_holiday_start_ && decoded.end == requested_holiday_end_;
+            const bool same = decoded.valid && decoded.start == requested_holiday_start_ && decoded.end == requested_holiday_end_;
             holiday_write_state_ = same ? WriteState::kVerified : WriteState::kFailed;
           }
         } else if (holiday_write_state_ == WriteState::kAcked) {
@@ -415,6 +445,12 @@ class ConnectEngine {
   // Call often. True when `tx` holds a frame whose verdict says how to treat it (kSend: transmit;
   // kDryRun: log only; blocked verdicts: counted, never transmitted).
   bool poll(uint32_t now_ms, TxRequest &tx) {
+    outdoor_sample_.tick(now_ms);
+    if (outdoor_writing_ && !outdoor_tx_allowed(now_ms)) {
+      next_id_ = transaction_.next_message_id();
+      transaction_.abort();
+      outdoor_writing_ = false;
+    }
     if (push_ack_pending_) {
       push_ack_pending_ = false;
       tx.length = build_push_ack(push_, push_length_, policy_.self_id, tx.frame, sizeof(tx.frame));
@@ -480,6 +516,13 @@ class ConnectEngine {
     size_t length = 0;
     const ReadTransaction::Action action = transaction_.poll(now_ms, tx.frame, sizeof(tx.frame), length);
     if (action == ReadTransaction::Action::kFailed) {
+      if (outdoor_writing_) {
+        outdoor_writing_ = false;
+        outdoor_confirmed_ = false;
+        next_id_ = transaction_.next_message_id();
+        transaction_.abort();
+        return false;
+      }
       if (zone_writing_) {
         // An unanswered burst is not a failure: the satellite may not have been listening. Try again later.
         zone_writing_ = false;
@@ -522,6 +565,7 @@ class ConnectEngine {
     if (tx.verdict == TxVerdict::kDryRun) {
       // Nothing will be transmitted: do not wait for an answer.
       ++stats_.dry_runs;
+      outdoor_writing_ = false;
       if (!writing_ && !holiday_writing_ && !zone_writing_) end_explore_failed_();
       if (writing_) {
         writing_ = false;
@@ -538,6 +582,7 @@ class ConnectEngine {
       transaction_.abort();
     } else if (tx.verdict != TxVerdict::kSend) {
       ++stats_.blocked;
+      outdoor_writing_ = false;
       if (!writing_ && !holiday_writing_ && !zone_writing_) end_explore_failed_();
       if (writing_) {
         writing_ = false;
@@ -676,6 +721,12 @@ class ConnectEngine {
   uint16_t explore_words() const { return explore_words_; }
 
  private:
+  OutdoorSample outdoor_sample_;
+  SlotSchedule outdoor_slot_;
+  bool outdoor_writing_{false};
+  bool outdoor_confirmed_{false};
+  uint32_t outdoor_last_ok_ms_{0};
+
   static constexpr size_t kQueue = 8;
 
   void end_explore_failed_() {
@@ -713,6 +764,7 @@ class ConnectEngine {
       consumption_slot_.reset();
       hot_water_slot_.reset();
       diag_slot_.reset();
+      outdoor_slot_.reset();
     }
     const uint32_t seconds = clock_.seconds(now_ms);
     for (size_t i = 0; i < kTemperatureSlots; ++i)
@@ -825,6 +877,13 @@ class ConnectEngine {
                                     static_cast<uint8_t>(kIdZone1 + zone_index_), zone_request_);
       zone_writing_ = true;
       ++stats_.zone_bursts;
+      return true;
+    }
+    if (outdoor_tx_allowed(now_ms) &&
+        outdoor_slot_.due(clock_.seconds(now_ms), now_ms, kSlotCycleSeconds, 240)) {
+      transaction_.start_outdoor(policy_.outdoor_association, next_id_, outdoor_sample_.temperature());
+      current_kind_ = ReadKind::kUnknown;
+      outdoor_writing_ = true;
       return true;
     }
     if (queue_length_ == 0) return false;

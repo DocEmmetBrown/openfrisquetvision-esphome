@@ -1,0 +1,16 @@
+# Optional replacement for the existing program card, after installing both packages.
+# Adapt ESPHome action and entity IDs to your actual entities.
+type: custom:frisquet-program-card
+entity: text.frisquet_zone_1_programme
+write_entity: sensor.frisquet_zone_1_ecriture
+comfort_entity: number.frisquet_zone_1_consigne_confort
+reduced_entity: number.frisquet_zone_1_consigne_reduit
+frost_entity: number.frisquet_zone_1_consigne_hors_gel
+profile_action: esphome.frisquet_apply_heating_profile
+# Set true only on the card in the separate Plannings tab (storage only, no boiler activation).
+profile_management: false
+profiles:
+  - input_text.frisquet_planning_1
+  - input_text.frisquet_planning_2
+  - input_text.frisquet_planning_3
+  - input_text.frisquet_planning_4

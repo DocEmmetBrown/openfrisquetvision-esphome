@@ -1,0 +1,12 @@
+# Optional ESPHome package: one zone write for the programme and its three setpoints.
+api:
+  actions:
+    - action: apply_heating_profile
+      variables:
+        program: string
+        comfort: float
+        reduced: float
+        frost: float
+      then:
+        - lambda: |-
+            id(frisquet_component).request_zone_profile(program, comfort, reduced, frost);

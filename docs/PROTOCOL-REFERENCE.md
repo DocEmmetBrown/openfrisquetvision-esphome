@@ -232,23 +232,32 @@ réponse : 7E 80 <assoc> <id> 81 17 02 00 <mode relu>                         (9
 Les bits `0x81` (« bits de trame », `0x80` ici) doivent être **recopiés tels que lus** dans `A0FC` ; ne pas les inventer : lire
 `A0FC` avant la première écriture. Vérifier l'écriture en relisant `A0FC` (la réponse donne déjà la valeur relue). Délai : < 1 s.
 
-### 6.2 Période vacances **[écriture non vérifiée sur chaudière réelle]**
+### 6.2 Période vacances **[vérifiée sur chaudière réelle le 11/11/2026]**
 
-`A0F0 – A0F7` contient les dates de début et de fin, chacune sur 32 bits et dans le même ordre de mots que l'horloge (`mot
-faible d'abord`). Les deux valeurs sont nulles lorsqu'aucune période n'est programmée. L'interface Home Assistant accepte des
+`A0F0 – A0F7` contient deux champs de **8 octets** : début à `A0F0`, fin à `A0F4`. Dans chaque champ, les quatre premiers
+octets portent l'horodatage 32 bits dans le même ordre de mots que l'horloge (`mot faible d'abord`) ; les quatre suivants
+sont nuls dans les trames observées. Les 16 octets sont nuls lorsqu'aucune période n'est programmée. L'interface Home Assistant accepte des
 dates/heures locales, encodées comme l'horloge locale de la chaudière (sans appliquer d'offset UTC), et l'activation envoie
-seulement ces quatre mots, sans réécrire le reste du bloc `A0F0 – A104` :
+seulement ces **huit mots**, sans réécrire le reste du bloc `A0F0 – A104` :
 
 ```
-80 7E <assoc> <id> 01 17 A0 F0 00 04 A0 F0 00 04 08 00 <début:4> <fin:4>
+80 7E <assoc> <id> 01 17 A0 F0 00 08 A0 F0 00 08 10 <début:4> 00 00 00 00 <fin:4> 00 00 00 00
 ```
 
-Cette forme est déduite de l'échange `17` général et de l'encodage observé, mais **la trame d'écriture vacances et son effet
-sur le chauffage / l'ECS n'ont pas encore été capturés sur une chaudière réelle**. Après l'accusé, l'implémentation relit
-`A0F0 × 0D` et ne déclare l'opération vérifiée que si les deux valeurs correspondent. Deux zéros annulent la période.
-Les notices Frisquet décrivent le mode vacances comme hors-gel sur chaque zone et arrêt de l'ECS ; l'effet réel de cette
-écriture, l'interprétation été/hiver et le comportement exact à l'instant de début/fin restent à confirmer. Effectuer d'abord
-un essai contrôlé avec une courte période et surveiller la chaudière.
+Cette trame de **31 octets** a été acceptée et relue sur la chaudière le 11/11/2026, pour une période future et son
+annulation. Le compteur `10` est immédiatement suivi des données : aucun octet supplémentaire ne le sépare du début.
+L'ancienne trame de 24 octets décalait les dates et écrivait la fin dans le champ de début. Après l'accusé, l'implémentation
+relit `A0F0 × 0D` et ne déclare l'opération vérifiée que si les deux valeurs et les octets nuls correspondent.
+Les périodes malformées restent lisibles comme invalides pour permettre une annulation de récupération ; elles ne sont
+jamais annoncées comme vérifiées. Une annulation exige aussi une première lecture du bloc.
+Essai réel du 11/11/2026 : période programmée de **17:53:36 à 18:01:36**, activation autonome du drapeau chaudière
+(`A029`, état `28` → `2A`), puis poussée `10 A0F0 × 0D` effaçant les dates à la fin, sans commande du Connect.
+La consigne du satellite est passée de **18 °C à 8 °C**, puis revenue à **18 °C** au cycle suivant. Le mode Auto, le
+programme et les trois températures sauvegardées sont restés inchangés ; aucune anomalie chaudière n'a été signalée.
+La consigne transmise par le satellite peut suivre le début ou la fin avec **10 à 20 minutes de retard**, d'où un essai
+de quelques minutes peu représentatif. Le mode Auto affiché n'exclut donc pas une période de vacances.
+Les notices décrivent aussi l'arrêt de l'ECS ; cet effet sur la production d'eau chaude n'a pas été sollicité séparément
+pendant l'essai. Les passages été/hiver et les autres versions de chaudière restent à valider.
 
 ### 6.3 Bloc de zone (48 octets) **[vérifié]**
 
@@ -443,7 +452,7 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 | `79E0 – 7A4F` | `79E0` et `79FC` : instantanés (`79EC` = `0320`, 80,0 constant : une consigne, pas l'ECS instantanée) ; `79F2` (7.1) ; **`7A16 – 7A17` horloge** : heure Unix sur 32 bits, **mot faible d'abord**, heure locale codée comme UTC ; `7A18` consommations ; **`7A30 – 7A33` appareils appairés** : deux fois (index, adresse) puis version BCD, ici `0308 2700 FF7E FFFF` = satellite `08` V27.00, Connect `7E` sans version (même après une association avec version, 3.3) ; reste `FFFF` |
 | `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure en direct, état et jour, NetworkID, `0080` |
 | `A029 – A09B` | `A029` page d'état (7.2) ; `A041` copie décalée ; **`A05E` corps de chauffe en direct** ; `A063 – A09A` consommations |
-| `A0F0 – A104` | **`A0F0 – A0F7` début / fin des vacances** (deux horodatages 32 bits, mot faible d'abord ; interprétation [hypothèse]) ; `A0F8 – A0F9` identifiant `AE80 66D3` ; **`A0FC` mode ECS** |
+| `A0F0 – A104` | **`A0F0 – A0F7` début / fin des vacances** (deux champs de 8 octets : horodatage 32 bits mot faible d'abord + quatre zéros ; écriture/relecture vérifiées, §6.2) ; `A0F8 – A0F9` identifiant `AE80 66D3` ; **`A0FC` mode ECS** |
 
 ---
 
@@ -453,6 +462,14 @@ Dans `7800 – 7BFF`, `9C00 – 9DFF` et `A000 – A2FF`, seuls ces mots se lise
 |---|---|---|
 | Satellite zone z | lit `A029 x15`, écrit `A02F + 5 × (z − 1)` : 1 mot (ambiante) ou 4 mots (ambiante, consigne, mode) [MQTT] ; écrit son bloc de zone (`A154`) lors d'un réglage local [vérifié] | toutes les 10 min, Z1 à `:x0`, Z2 à `:x1`, Z3 à `:x2` [MQTT] |
 | Sonde extérieure (`20`) | lit `9C54 x4` (date), écrit `A029 x1` (température extérieure) [MQTT] | toutes les 10 min à `:x4` [MQTT] |
+
+**Émulation extérieure optionnelle [non vérifiée sur l'installation]** : `outdoor_emulation: true` autorise uniquement
+la trame `80 20 <association sonde> <id> 01 17 9C 54 00 04 A0 29 00 01 02 <température:2>`.
+Température signée en dixièmes de °C (`FFEC` = −2,0 °C). La réponse attendue est
+`20 80 <association sonde> <id> 81 17 08 <date:8>`. L'association de sonde est distincte de celle du Connect,
+limitée au même réseau, avec version `01 21 01 02` issue des recherches. La valeur HA doit être accompagnée de son âge ;
+elle expire à 180 minutes, même pendant une transaction. Voir [OUTDOOR-SENSOR.md](OUTDOOR-SENSOR.md).
+Cette implémentation ne couvre pas les échanges de maintenance à 04:00 signalés dans les sources externes.
 
 **Trames du satellite [vérifié le 01/11/2026]** : reçues depuis que le satellite a été déplacé (31/10, ≈ −100 dBm ; jamais reçues
 avant). Échange régulier toutes les 10 min à `:x0:05`/`:x0:06` :

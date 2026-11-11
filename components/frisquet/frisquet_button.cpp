@@ -13,6 +13,7 @@ void FrisquetButton::press_action() {
   switch (this->kind_) {
     case kRecoverNetwork: this->parent_->start_network_recovery(); break;
     case kAssociate: this->parent_->start_association(); break;
+    case kOutdoorAssociate: this->parent_->start_outdoor_association(); break;
     case kForgetNetwork: this->parent_->forget_network(); break;
     case kHolidayActivate:
       if (!this->parent_->request_holiday()) ESP_LOGW(TAG, "Holiday activation refused (invalid dates or write unavailable)");

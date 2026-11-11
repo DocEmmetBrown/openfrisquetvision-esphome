@@ -4,6 +4,8 @@
 #
 # Les identifiants sont ceux d'un appareil nommé « Frisquet » (climate.frisquet_zone_1…). Si les vôtres diffèrent
 # (autre nom, pièce dans le nom), générez la version adaptée : python3 homeassistant/dashboard.py cuisine_frisquette
+# Installer aussi la ressource frisquet-program-card.js : voir README.md, section Home Assistant.
+# Les profils et l'onglet Plannings nécessitent les helpers HA et l'action ESPHome décrits dans docs/PROGRAM-PROFILES.md.
 title: Chauffage
 views:
   - title: Chauffage
@@ -30,14 +32,101 @@ views:
             name: Mode
           - entity: switch.frisquet_zone_1_boost
             name: Boost (+1 °C, 6 h max)
-          - entity: number.frisquet_zone_1_consigne_confort
-            name: Consigne confort
-          - entity: number.frisquet_zone_1_consigne_reduit
-            name: Consigne réduit
-          - entity: number.frisquet_zone_1_consigne_hors_gel
-            name: Consigne hors-gel
-          - entity: sensor.frisquet_zone_1_programme_lisible
-            name: Programme
+
+      - type: custom:frisquet-program-card
+        entity: text.frisquet_zone_1_programme
+        write_entity: sensor.frisquet_zone_1_ecriture
+        comfort_entity: number.frisquet_zone_1_consigne_confort
+        reduced_entity: number.frisquet_zone_1_consigne_reduit
+        frost_entity: number.frisquet_zone_1_consigne_hors_gel
+        profile_action: esphome.frisquet_apply_heating_profile
+        profiles:
+          - input_text.frisquet_planning_1
+          - input_text.frisquet_planning_2
+          - input_text.frisquet_planning_3
+          - input_text.frisquet_planning_4
+
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ## Températures de consigne
+              Ajustez avec **− / +** (0,5 °C), ou cliquez sur une tuile pour saisir une température.
+          - type: tile
+            entity: number.frisquet_zone_1_consigne_confort
+            name: Confort
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.frisquet_zone_1_consigne_reduit
+            name: Réduit
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.frisquet_zone_1_consigne_hors_gel
+            name: Hors-gel
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            features:
+              - type: numeric-input
+                style: buttons
+
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ## Vacances
+              Choisissez les dates et heures locales de début et de fin, puis **Programmer**.
+              Une absence de quelques heures est possible. Modifier les dates ne suffit pas à les appliquer.
+
+              **Expérimental :** le comportement sur chaudière réelle reste à valider.
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: datetime.frisquet_chaudiere_vacances_debut
+                name: Début de l'absence
+              - entity: datetime.frisquet_chaudiere_vacances_fin
+                name: Fin de l'absence
+              - entity: sensor.frisquet_chaudiere_vacances_etat
+                name: Période confirmée par la chaudière
+              - entity: sensor.frisquet_chaudiere_vacances_ecriture
+                name: État de la commande
+          - type: horizontal-stack
+            cards:
+              - type: button
+                entity: button.frisquet_chaudiere_activer_les_vacances
+                name: Programmer
+                icon: mdi:calendar-check
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.frisquet_chaudiere_activer_les_vacances
+                  confirmation:
+                    text: Programmer les vacances avec les dates et heures choisies ?
+              - type: button
+                entity: button.frisquet_chaudiere_annuler_les_vacances
+                name: Annuler les vacances
+                icon: mdi:calendar-remove
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.frisquet_chaudiere_annuler_les_vacances
+                  confirmation:
+                    text: Effacer la période de vacances de la chaudière ?
 
       - type: entities
         title: Chaudière
@@ -46,18 +135,6 @@ views:
             name: État
           - entity: binary_sensor.frisquet_chaudiere_bruleur
             name: Brûleur
-          - entity: sensor.frisquet_chaudiere_vacances_etat
-            name: Vacances programmées
-          - entity: datetime.frisquet_chaudiere_vacances_debut
-            name: Début
-          - entity: datetime.frisquet_chaudiere_vacances_fin
-            name: Fin
-          - entity: button.frisquet_chaudiere_activer_les_vacances
-            name: Activer la période choisie
-          - entity: button.frisquet_chaudiere_annuler_les_vacances
-            name: Annuler les vacances
-          - entity: sensor.frisquet_chaudiere_vacances_ecriture
-            name: État de la commande
           - entity: select.frisquet_chaudiere_mode_ecs
             name: Eau chaude
           - entity: sensor.frisquet_chaudiere_eau_chaude
@@ -117,3 +194,21 @@ views:
             name: Dernière trame
           - entity: switch.frisquet_radio_arret_d_urgence
             name: Arrêt d'urgence (n'émet plus rien)
+
+  - title: Plannings
+    path: plannings
+    icon: mdi:calendar-edit
+    cards:
+      - type: custom:frisquet-program-card
+        entity: text.frisquet_zone_1_programme
+        write_entity: sensor.frisquet_zone_1_ecriture
+        comfort_entity: number.frisquet_zone_1_consigne_confort
+        reduced_entity: number.frisquet_zone_1_consigne_reduit
+        frost_entity: number.frisquet_zone_1_consigne_hors_gel
+        profile_action: esphome.frisquet_apply_heating_profile
+        profile_management: true
+        profiles:
+          - input_text.frisquet_planning_1
+          - input_text.frisquet_planning_2
+          - input_text.frisquet_planning_3
+          - input_text.frisquet_planning_4

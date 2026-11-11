@@ -132,7 +132,7 @@ Une lecture est **refusée en entier** dès qu'un de ses mots est invalide (rép
 | `79E0 – 7A4F` | deux **instantanés** de même structure (`79E0`, rafraîchi vers `:x2` ; `79FC`, vers `:x8`) : ECS, corps de chauffe, départs, fumées… ; `79F2` (ambiantes, consignes, extérieure) ; `7A18` (consommations aux mots 9 et 10, toujours nulles ici) ; `7A16` compteur (+1 par seconde environ) |
 | `9C40 – 9C5A` | `9C54 – 9C5A` : date et heure **en direct**, état et jour, NetworkID, `0080` (lu par la sonde extérieure) |
 | `A029 – A09B` | `A029` : **état en direct** (extérieure, date, état, zones ; voir la diffusion) ; `A041` : copie décalée ; **`A05E` = température du corps de chauffe en direct** (dixièmes de °C ; suit la flamme avec ~30 s d'inertie, voir DESIGN 10.23) ; `A063 – A09A` consommations annuelles (nulles) |
-| `A0F0 – A104` | `A0F0 – A0F7` dates début/fin vacances (deux horodatages 32 bits, mot faible d'abord ; [hypothèse]) ; `A0F8` identifiant `AE80 66D3` ; `A0FC` **mode ECS** |
+| `A0F0 – A104` | `A0F0 – A0F7` début/fin vacances (deux champs de 8 octets : horodatage 32 bits mot faible d'abord + quatre zéros ; écriture/relecture vérifiées) ; `A0F8` identifiant `AE80 66D3` ; `A0FC` **mode ECS** |
 
 ## Échanges des autres appareils (satellite capté depuis le 31/10/2026, sonde d'après le firmware MQTT)
 

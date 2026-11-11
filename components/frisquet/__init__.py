@@ -39,6 +39,7 @@ CONF_SATELLITE_OVERRIDE = "satellite_override"
 CONF_SATELLITE_ASSOCIATION = "satellite_association"
 CONF_BURNER = "burner"
 CONF_BOILER_FAULT = "boiler_fault"
+CONF_OUTDOOR_EMULATION = "outdoor_emulation"
 DEVICE_CLASS_HEAT = "heat"
 DEVICE_CLASS_PROBLEM = "problem"
 
@@ -175,6 +176,7 @@ TEXT_SENSORS = {
     # Holiday period read from the boiler; the write state reports whether an update was verified.
     "holiday_state": text_sensor.text_sensor_schema(),
     "holiday_write": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    "outdoor_emulation_state": text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 }
 
 
@@ -195,6 +197,8 @@ def network_id(value):
 
 
 def _validate_tx(config):
+    if config[CONF_OUTDOOR_EMULATION] and config[CONF_TX] != "write":
+        raise cv.Invalid("outdoor_emulation requires tx: write")
     if config[CONF_TX] != "none":
         if config.get(CONF_ASSOCIATION) == 0xFF:
             raise cv.Invalid("association 0xFF means 'not associated': leave it out to learn it by pairing")
@@ -232,6 +236,7 @@ CONFIG_SCHEMA = cv.All(
         # following at its next slot. Its association byte is learned from the boiler's answers unless given.
         cv.Optional(CONF_SATELLITE_OVERRIDE, default=False): cv.boolean,
         cv.Optional(CONF_SATELLITE_ASSOCIATION): cv.hex_uint8_t,
+        cv.Optional(CONF_OUTDOOR_EMULATION, default=False): cv.boolean,
         # Burner on: the live heating-body temperature rises (0xA05E every 15 s; ~30-40 s of thermal lag).
         cv.Optional(CONF_BURNER): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_HEAT),
         # ON while the boiler state shows an anomaly bit (0x01 radio partner, 0x80 boiler).
@@ -282,6 +287,7 @@ async def to_code(config):
         if config[CONF_SATELLITE_OVERRIDE]:
             cg.add(var.set_satellite_override(config.get(CONF_SATELLITE_ASSOCIATION, 0xFF)))
         cg.add(var.set_live_body_reads(CONF_BURNER in config or "heating_body_live" in config))
+        cg.add(var.set_outdoor_emulation(config[CONF_OUTDOOR_EMULATION]))
 
     for index, key in enumerate(SENSORS):
         if key in config:

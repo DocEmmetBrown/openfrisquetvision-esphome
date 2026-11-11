@@ -226,12 +226,15 @@ number:
   - platform: frisquet
     type: zone1_comfort
     name: Zone 1 consigne confort
+    mode: box
   - platform: frisquet
     type: zone1_reduced
     name: Zone 1 consigne réduit
+    mode: box
   - platform: frisquet
     type: zone1_frost
     name: Zone 1 consigne hors-gel
+    mode: box
 
 text:
   - platform: frisquet

@@ -1,5 +1,6 @@
 #include "frisquet_radio.h"
 
+#include <cmath>
 #include <ctime>
 #include "zone_climate.h"
 
@@ -147,9 +148,15 @@ bool FrisquetRadio::request_holiday() {
 #ifdef FRISQUET_TX_ENABLED
   if (!this->holiday_start_valid_ || !this->holiday_end_valid_ || this->holiday_end_ <= this->holiday_start_) {
     ESP_LOGW(TAG, "Holiday activation refused: set a valid end date/time after the start");
+    this->publish_text_(kHolidayWrite, "Refus : choisissez une fin après le début");
     return false;
   }
-  return this->engine_.request_holiday(this->holiday_start_, this->holiday_end_);
+  if (!this->engine_.request_holiday(this->holiday_start_, this->holiday_end_)) {
+    ESP_LOGW(TAG, "Holiday activation refused: waiting for boiler data or another write");
+    this->publish_text_(kHolidayWrite, "Refus : lecture chaudière requise ou autre écriture en cours");
+    return false;
+  }
+  return true;
 #else
   return false;
 #endif
@@ -157,7 +164,12 @@ bool FrisquetRadio::request_holiday() {
 
 bool FrisquetRadio::cancel_holiday() {
 #ifdef FRISQUET_TX_ENABLED
-  return this->engine_.request_holiday(0, 0);
+  if (!this->engine_.request_holiday(0, 0)) {
+    ESP_LOGW(TAG, "Holiday cancellation refused: waiting for boiler data or another write");
+    this->publish_text_(kHolidayWrite, "Refus : lecture chaudière requise ou autre écriture en cours");
+    return false;
+  }
+  return true;
 #else
   return false;
 #endif
@@ -242,6 +254,29 @@ bool FrisquetRadio::request_zone_program(const std::string &hex) {
   uint8_t program[::frisquet::kProgramSize];
   if (!::frisquet::parse_program_hex(hex.c_str(), hex.size(), program)) return false;
   return this->engine_.request_zone_program(0, program);
+}
+
+bool FrisquetRadio::request_zone_profile(const std::string &hex, float comfort, float reduced, float frost) {
+  const float temperatures[3] = {comfort, reduced, frost};
+  uint8_t raw[3];
+  for (size_t i = 0; i < 3; ++i) {
+    const float value = temperatures[i];
+    if (!std::isfinite(value) || value < 5 || value > (i == 2 ? 15 : 30) || value * 2 != std::floor(value * 2)) {
+      ESP_LOGW(TAG, "Profile refused: temperatures must be in range with 0.5 C steps");
+      this->publish_text_(kZoneWrite, "refused: invalid profile temperatures");
+      return false;
+    }
+    raw[i] = static_cast<uint8_t>(std::lround(value * 10) - 50);
+  }
+  uint8_t program[::frisquet::kProgramSize];
+  if (!::frisquet::parse_program_hex(hex.c_str(), hex.size(), program) ||
+      !this->engine_.request_zone_profile(0, program, raw[0], raw[1], raw[2])) {
+    ESP_LOGW(TAG, "Profile refused: invalid programme or setpoints, block unconfirmed, boost/write active, or writes disabled");
+    this->publish_text_(kZoneWrite, "refused: invalid profile, unconfirmed block, boost/write active or writes disabled");
+    return false;
+  }
+  ESP_LOGI(TAG, "Profile queued as one zone block; current heating mode preserved");
+  return true;
 }
 
 void FrisquetRadio::restore_zone_blocks_() {
@@ -386,6 +421,11 @@ bool FrisquetRadio::request_zone_boost(bool) { return false; }
 const uint8_t *FrisquetRadio::zone1_block() const { return nullptr; }
 bool FrisquetRadio::request_zone_target(float) { return false; }
 bool FrisquetRadio::request_zone_program(const std::string &) { return false; }
+bool FrisquetRadio::request_zone_profile(const std::string &, float, float, float) {
+  ESP_LOGW(TAG, "Profile refused: requires tx: write");
+  this->publish_text_(kZoneWrite, "refused: requires tx: write");
+  return false;
+}
 #endif
 
 static std::string format_network(const uint8_t *n) {
@@ -458,6 +498,7 @@ bool FrisquetRadio::start_network_recovery() {
     ESP_LOGW(TAG, "NetworkID recovery refused (a pairing session is already running)");
     return false;
   }
+  this->pairing_outdoor_ = false;
   ESP_LOGI(TAG, "NetworkID recovery: listening on the broadcast network for %u s (boiler in pairing mode)",
            static_cast<unsigned>(::frisquet::kPairingListenMs / 1000));
 #ifdef FRISQUET_TX_ENABLED
@@ -484,6 +525,7 @@ bool FrisquetRadio::start_association() {
     return false;
   }
   this->pairing_.set_confirm_payload(this->pairing_version_set_ ? this->pairing_version_ : nullptr);
+  this->pairing_outdoor_ = false;
   if (this->pairing_version_set_)
     ESP_LOGI(TAG, "Association: answering with version %02X %02X %02X %02X", this->pairing_version_[0],
              this->pairing_version_[1], this->pairing_version_[2], this->pairing_version_[3]);
@@ -498,6 +540,67 @@ bool FrisquetRadio::start_association() {
 #endif
 }
 
+bool FrisquetRadio::start_outdoor_association() {
+#ifdef FRISQUET_TX_ENABLED
+  if (!this->outdoor_emulation_ || !this->pairing_allowed_ || this->killed_ || this->dry_run_ ||
+      this->tx_level_ < 3 || !this->on_installation_network_() || this->association_ == 0xFF ||
+      !this->engine_.outdoor_sample().usable(millis()) || this->engine_.outdoor_sample().stale(millis()) ||
+      this->is_failed() || this->radio_ == nullptr) {
+    ESP_LOGW(TAG, "Outdoor association refused: enable outdoor_emulation, pairing and writes, pair the Connect, and supply a valid temperature first");
+    return false;
+  }
+  if (!this->pairing_.start(::frisquet::PairingKind::kAssociate, ::frisquet::kIdOutdoorSensor,
+                             this->active_network_, millis())) {
+    ESP_LOGW(TAG, "Outdoor association refused: another pairing session is active");
+    return false;
+  }
+  static const uint8_t version[4] = {0x01, 0x21, 0x01, 0x02};
+  this->pairing_.set_confirm_payload(version);
+  this->pairing_outdoor_ = true;
+  this->pending_tx_valid_ = false;
+  this->apply_network_();
+  ESP_LOGW(TAG, "Outdoor sensor pairing started explicitly; this changes boiler regulation");
+  return true;
+#else
+  ESP_LOGW(TAG, "Outdoor association requires tx: write");
+  return false;
+#endif
+}
+
+void FrisquetRadio::receive_outdoor_temperature(float celsius, int32_t age_seconds) {
+#ifdef FRISQUET_TX_ENABLED
+  if (!this->engine_.outdoor_sample().update(celsius, age_seconds, millis())) {
+    ESP_LOGW(TAG, "Outdoor sample rejected: temperature must be -40..60 C, age 0..10799 seconds");
+    return;
+  }
+  this->sync_outdoor_(millis());
+#else
+  ESP_LOGW(TAG, "Outdoor sample ignored: transmit path is disabled");
+#endif
+}
+
+void FrisquetRadio::sync_outdoor_(uint32_t now) {
+#ifdef FRISQUET_TX_ENABLED
+  auto &sample = this->engine_.outdoor_sample();
+  sample.tick(now);
+  const char *state = !this->outdoor_emulation_ ? "Désactivée"
+      : !sample.usable(now) ? "ALERTE : mesure absente ou expirée, émission arrêtée"
+      : this->outdoor_association_ == 0xFF ? "Non associée"
+      : this->killed_ ? "Arrêt d'urgence"
+      : sample.stale(now) ? "ALERTE : ancienne mesure conservée (maximum 180 min)"
+      : this->engine_.outdoor_confirmed() && now - this->engine_.outdoor_last_ok_ms() < 15UL * 60UL * 1000UL
+          ? "Mesure fraîche, chaudière répond"
+          : "Mesure fraîche, attente de réponse chaudière";
+  if (this->last_outdoor_state_ != state) {
+    this->last_outdoor_state_ = state;
+    if (sample.stale(now) && this->outdoor_emulation_) ESP_LOGW(TAG, "Outdoor sensor: %s", state);
+    this->publish_text_(kOutdoorEmulationState, state);
+  }
+#else
+  (void)now;
+#endif
+}
+
 bool FrisquetRadio::forget_network() {
   if (this->pairing_.active()) {
     ESP_LOGW(TAG, "Forget refused: a pairing session is running");
@@ -506,6 +609,18 @@ bool FrisquetRadio::forget_network() {
   NetworkStoreBlob blob{};
   this->network_pref_.save(&blob);  // all zeros: rejected by unpack_network_store()
   global_preferences->sync();
+#ifdef FRISQUET_TX_ENABLED
+  if (!this->outdoor_pref_.save(&blob) || !global_preferences->sync())
+    ESP_LOGE(TAG, "Clearing outdoor sensor association failed");
+#endif
+  this->outdoor_association_ = 0xFF;
+#ifdef FRISQUET_TX_ENABLED
+  {
+    auto policy = this->engine_.policy();
+    policy.outdoor_association = 0xFF;
+    this->engine_.set_policy(policy);
+  }
+#endif
   memcpy(this->active_network_, this->network_id_, 4);
   this->network_learned_ = false;
 #ifdef FRISQUET_TX_ENABLED
@@ -513,6 +628,7 @@ bool FrisquetRadio::forget_network() {
     this->association_ = this->yaml_association_;
     ::frisquet::TxPolicy policy = this->engine_.policy();
     policy.association = this->association_;
+    policy.outdoor_association = 0xFF;
     this->engine_.set_policy(policy);
   }
 #endif
@@ -566,6 +682,24 @@ void FrisquetRadio::pairing_step_(uint32_t now) {
       policy.pairing = this->pairing_allowed_;
       policy.pairing_version = this->pairing_version_set_;
       memcpy(policy.pairing_payload, this->pairing_version_, 4);
+      if (this->pairing_outdoor_) {
+        policy.self_id = ::frisquet::kIdOutdoorSensor;
+        policy.pairing_version = true;
+        const uint8_t version[4] = {0x01, 0x21, 0x01, 0x02};
+        memcpy(policy.pairing_payload, version, 4);
+        if (!::frisquet::outdoor_offer_allowed(this->pairing_.offer(), this->pairing_.offer_length(),
+                                               this->active_network_) ||
+            !this->engine_.outdoor_sample().usable(now) || this->killed_) {
+          ESP_LOGW(TAG, "Outdoor pairing refused: wrong network/device, stale sample or emergency stop");
+          this->pairing_.cancel();
+          this->pairing_.acknowledge();
+          length = 0;
+        }
+      }
+      if (length == 0) {
+        this->apply_network_();
+        return;
+      }
       const ::frisquet::TxVerdict verdict = ::frisquet::evaluate_tx(
           policy, frame, length, this->pairing_.offer(), this->pairing_.offer_length());
       ESP_LOGI(TAG, "TX %s association-confirm %s", ::frisquet::verdict_name(verdict),
@@ -582,6 +716,7 @@ void FrisquetRadio::pairing_step_(uint32_t now) {
         ESP_LOGW(TAG, "Association not confirmed (%s): staying on %s", ::frisquet::verdict_name(verdict),
                  format_network(this->active_network_).c_str());
         this->pairing_.cancel();
+        this->pairing_.acknowledge();
       }
 #else
       this->pairing_.cancel();
@@ -591,23 +726,45 @@ void FrisquetRadio::pairing_step_(uint32_t now) {
 
   const ::frisquet::PairingState state = this->pairing_.state();
   if (state == ::frisquet::PairingState::kSucceeded) {
-    memcpy(this->active_network_, this->pairing_.network(), 4);
-    this->network_learned_ = true;
-    uint8_t stored_association = 0xFF;
+    if (this->pairing_outdoor_) {
 #ifdef FRISQUET_TX_ENABLED
-    if (this->pairing_.kind() == ::frisquet::PairingKind::kAssociate) {
-      this->association_ = this->pairing_.association();
-      stored_association = this->association_;
-      ::frisquet::TxPolicy policy = this->engine_.policy();
-      policy.association = this->association_;
+      this->outdoor_association_ = this->pairing_.association();
+      NetworkStoreBlob blob;
+      ::frisquet::pack_network_store(this->active_network_, this->outdoor_association_, blob.data);
+      if (!this->outdoor_pref_.save(&blob) || !global_preferences->sync())
+        ESP_LOGE(TAG, "Saving outdoor sensor association failed");
+      auto policy = this->engine_.policy();
+      policy.outdoor_association = this->outdoor_association_;
       this->engine_.set_policy(policy);
-    } else if (this->association_ != this->yaml_association_) {
-      stored_association = this->association_;  // keep a previously learned association
-    }
+      ESP_LOGI(TAG, "Outdoor sensor associated; Connect identity unchanged");
 #endif
-    this->save_network_(stored_association);
-    ESP_LOGI(TAG, "Pairing succeeded: NetworkID %s, association %02X", format_network(this->active_network_).c_str(),
-             this->association_);
+    } else {
+      if (memcmp(this->active_network_, this->pairing_.network(), 4) != 0) {
+        this->outdoor_association_ = 0xFF;
+#ifdef FRISQUET_TX_ENABLED
+        auto policy = this->engine_.policy();
+        policy.outdoor_association = 0xFF;
+        this->engine_.set_policy(policy);
+#endif
+      }
+      memcpy(this->active_network_, this->pairing_.network(), 4);
+      this->network_learned_ = true;
+      uint8_t stored_association = 0xFF;
+#ifdef FRISQUET_TX_ENABLED
+      if (this->pairing_.kind() == ::frisquet::PairingKind::kAssociate) {
+        this->association_ = this->pairing_.association();
+        stored_association = this->association_;
+        ::frisquet::TxPolicy policy = this->engine_.policy();
+        policy.association = this->association_;
+        this->engine_.set_policy(policy);
+      } else if (this->association_ != this->yaml_association_) {
+        stored_association = this->association_;  // keep a previously learned association
+      }
+#endif
+      this->save_network_(stored_association);
+      ESP_LOGI(TAG, "Pairing succeeded: NetworkID %s, association %02X", format_network(this->active_network_).c_str(),
+               this->association_);
+    }
   }
   this->apply_network_();
   if (static_cast<int>(state) != this->last_pairing_state_ && state != ::frisquet::PairingState::kIdle) {
@@ -619,6 +776,7 @@ void FrisquetRadio::pairing_step_(uint32_t now) {
   if (!this->pairing_.active() && state != ::frisquet::PairingState::kIdle) {
     this->pairing_.acknowledge();
     this->last_pairing_state_ = -1;
+    this->pairing_outdoor_ = false;
   }
 }
 
@@ -697,6 +855,17 @@ void FrisquetRadio::setup() {
 
 #ifdef FRISQUET_TX_ENABLED
   ::frisquet::TxPolicy policy;
+  this->outdoor_pref_ = global_preferences->make_preference<NetworkStoreBlob>(fnv1_hash("frisquet_outdoor"));
+  {
+    NetworkStoreBlob blob;
+    uint8_t network[4], association;
+    if (this->outdoor_pref_.load(&blob) &&
+        ::frisquet::unpack_network_store(blob.data, sizeof(blob.data), network, association) &&
+        memcmp(network, this->active_network_, 4) == 0)
+      this->outdoor_association_ = association;
+  }
+  policy.outdoor_enabled = this->outdoor_emulation_;
+  policy.outdoor_association = this->outdoor_association_;
   policy.level = this->tx_level_ >= 3   ? ::frisquet::TxLevel::kWrite
                  : this->tx_level_ >= 2 ? ::frisquet::TxLevel::kAck
                                         : ::frisquet::TxLevel::kRead;
@@ -743,6 +912,10 @@ void FrisquetRadio::loop() {
   this->pairing_step_(millis());
 #ifdef FRISQUET_TX_ENABLED
   this->tx_step_(millis());
+  if (now - this->last_outdoor_publish_ms_ >= 1000) {
+    this->last_outdoor_publish_ms_ = now;
+    this->sync_outdoor_(now);
+  }
 #endif
 #ifdef USE_CLIMATE
   if (this->zone_climate_ != nullptr) this->zone_climate_->refresh();
@@ -762,6 +935,7 @@ static const char *tx_kind_name(::frisquet::TxClass kind) {
     case ::frisquet::TxClass::kPushAck: return "push-ack";
     case ::frisquet::TxClass::kHotWaterWrite: return "hot-water-write";
     case ::frisquet::TxClass::kHolidayWrite: return "holiday-write";
+    case ::frisquet::TxClass::kOutdoorWrite: return "outdoor-temperature";
     case ::frisquet::TxClass::kZoneWrite: return "zone-write";
     case ::frisquet::TxClass::kSatelliteConsigne: return "satellite-consigne";
     case ::frisquet::TxClass::kSatelliteBlock: return "satellite-block";
@@ -810,6 +984,11 @@ void FrisquetRadio::tx_step_(uint32_t now) {
 
 void FrisquetRadio::transmit_pending_() {
   this->pending_tx_valid_ = false;
+  if (this->pending_tx_.kind == ::frisquet::TxClass::kOutdoorWrite &&
+      !this->engine_.outdoor_tx_allowed(millis())) {
+    ESP_LOGW(TAG, "Outdoor transmission cancelled: disabled, unpaired or expired temperature");
+    return;
+  }
   // The kill switch can be engaged during the 30 ms wait: honour it right before transmitting.
   if (this->killed_) {
     ESP_LOGW(TAG, "TX cancelled by the kill switch");
@@ -1002,8 +1181,18 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
     }
     case ::frisquet::ReadKind::kHoliday: {
       ::frisquet::HolidayBlock holiday;
-      if (!::frisquet::decode_holiday_block(frame, length, holiday)) break;
-      if (holiday.start == 0) {
+      if (!::frisquet::decode_holiday_block(frame, length, holiday)) {
+        ESP_LOGW(TAG, "Invalid holiday block: %s", format_hex_pretty(frame, length).c_str());
+        this->publish_text_(kHolidayState, "Bloc vacances non pris en charge");
+        break;
+      }
+      if (!holiday.valid) {
+        ESP_LOGW(TAG, "Invalid holiday period: start=%lu end=%lu", static_cast<unsigned long>(holiday.start),
+                 static_cast<unsigned long>(holiday.end));
+        this->publish_text_(kHolidayState, "Période invalide ; annulez les vacances");
+        break;
+      }
+      if (holiday.start == 0 && holiday.end == 0) {
         this->publish_text_(kHolidayState, "Aucune");
         break;
       }
@@ -1016,10 +1205,15 @@ void FrisquetRadio::publish_read_(::frisquet::ReadKind kind, const uint8_t *fram
         this->publish_text_(kHolidayState, "Dates illisibles");
         break;
       }
+      char start_text[17], end_text[17];
+      if (strftime(start_text, sizeof(start_text), "%Y-%m-%d %H:%M", &start_tm) == 0 ||
+          strftime(end_text, sizeof(end_text), "%Y-%m-%d %H:%M", &end_tm) == 0) {
+        ESP_LOGW(TAG, "Could not format holiday date strings");
+        this->publish_text_(kHolidayState, "Dates illisibles");
+        break;
+      }
       char text[48];
-      snprintf(text, sizeof(text), "%04d-%02d-%02d %02d:%02d → %04d-%02d-%02d %02d:%02d", start_tm.tm_year + 1900,
-               start_tm.tm_mon + 1, start_tm.tm_mday, start_tm.tm_hour, start_tm.tm_min, end_tm.tm_year + 1900,
-               end_tm.tm_mon + 1, end_tm.tm_mday, end_tm.tm_hour, end_tm.tm_min);
+      snprintf(text, sizeof(text), "%s → %s", start_text, end_text);
       this->publish_text_(kHolidayState, text);
       break;
     }

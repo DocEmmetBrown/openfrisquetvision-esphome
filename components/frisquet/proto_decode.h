@@ -351,13 +351,17 @@ inline bool decode_hot_water_mode(const uint8_t *frame, size_t length, DecodedHo
 struct HolidayBlock {
   uint32_t start = 0;
   uint32_t end = 0;
+  bool valid = true;
 };
 
 inline bool decode_holiday_values(const uint8_t *data, size_t length, HolidayBlock &out) {
-  if (!data || length < 8) return false;
+  if (!data || length < 16) return false;
+  static const uint8_t zero[4] = {};
   out.start = decode_holiday_timestamp(data);
-  out.end = decode_holiday_timestamp(data + 4);
-  return (out.start == 0 && out.end == 0) || (out.start != 0 && out.end > out.start);
+  out.end = decode_holiday_timestamp(data + 8);
+  out.valid = memcmp(data + 4, zero, 4) == 0 && memcmp(data + 12, zero, 4) == 0 &&
+              ((out.start == 0 && out.end == 0) || (out.start != 0 && out.end > out.start));
+  return true;
 }
 
 inline bool decode_holiday_block(const uint8_t *frame, size_t length, HolidayBlock &out) {

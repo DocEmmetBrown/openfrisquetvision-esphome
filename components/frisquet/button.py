@@ -18,6 +18,7 @@ TYPES = {
     "forget_network": "kForgetNetwork",
     "holiday_activate": "kHolidayActivate",
     "holiday_cancel": "kHolidayCancel",
+    "outdoor_associate": "kOutdoorAssociate",
 }
 
 FrisquetButton = frisquet_ns.class_("FrisquetButton", button.Button, cg.Component)

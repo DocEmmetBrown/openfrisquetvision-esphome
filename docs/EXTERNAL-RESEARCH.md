@@ -40,7 +40,7 @@ Two sources were already known: OpenFrisquetVisio (FreedomNX) and frisquet-bridg
 |---|---|---|
 | **`7A16–7A17` is the boiler clock**, not a counter: a 32-bit Unix time stored **low word first**, holding local time as if it were UTC. | `scan-flame2.jsonl` 10:52:28: `c871 6ae5` → 0x6AE5C871 = 2026-10-31 10:52:33 | One read gives the full date and time. It could replace or cross-check `A02B` in `proto_clock.h`. Fix the wording "compteur (+1/s)" in PROTOCOL-REFERENCE §8. |
 | **`A0F8–A0F9` = `AE80 66D3`** uses the same encoding: 0x66D3AE80 = **2024-09-01 00:00**. | `scan-reads.jsonl`, read of A0F0 | The "identifier" is a date, probably a setting such as the next-service date. Ask the user whether the service reminder is set to 09/2024. |
-| `A0F0–A0F7` = holiday start and end in the same encoding, all zero when there is no holiday [d33d33]. Ours read zero. | same read | Gives a holiday feature (section 4.6). |
+| `A0F0–A0F7` = two 8-byte holiday date fields: low-word-first timestamp followed by four zero bytes. End starts at `A0F4`, not `A0F2`. | d33d33 `src/connect/holiday.rs`; live read/write/readback on 2026-11-11 | Write eight words, with no extra byte after the data length. |
 | `7931 = 1901` = **panel firmware V19.01**. Freedom's boiler reads 1901 too; `7541` holds the same value on other boilers. | `scan-map-780E.txt` | Can be shown as a diagnostic sensor. |
 | `9C54` page: BCD date, status, weekday (**0 = Sunday**), **NetworkID at `9C58–9C59`**, **`0080` = boiler address at `9C5A`** | `scan-map-9C00.txt` (29/10/2026 = 4) | A second source for the NetworkID and the boiler address. |
 | `7A07` (byte 42 of our `79F2` read) = `0009` at rest. Sheet: `0005`/`0009` standby, `0007` hot-water heating. | `scan-map-780E.txt` | Agrees with our "operating state". |
@@ -292,10 +292,12 @@ The modules below are the `components/frisquet/proto_*.h` headers.
    - Stop: restore the stored comfort setpoint and clear `0x40`, after 6 h or on request.
    - Persist the original setpoint, because the Connect owns the timer.
    - Not available on underfloor circuits or with outdoor-only regulation.
-6. **Holiday**: the firmware now exposes a start/end date-time range and an explicit activate/cancel action. The inferred
-   `A0F0` partial write changes only four words, then reads `A0F0 × 0D` back for verification.
-   - Still unverified on a real boiler: write frame acceptance, timezone/DST interpretation, end-point semantics, and the
-     heating/DHW behavior. Test a short window while monitoring the boiler before relying on it.
+6. **Holiday**: the firmware exposes a start/end date-time range and an explicit activate/cancel action.
+   The `A0F0` partial write changes eight words, then reads `A0F0 × 0D` back for verification.
+   - Future programming, cancellation, autonomous start and expiry verified on the real boiler on 2026-11-11.
+     The boiler pushed cleared dates at expiry; the satellite setpoint went 18 → 8 → 18 °C without changing the saved
+     Auto mode, weekly program or temperatures. Satellite effects lagged by up to two 10-minute exchanges.
+   - Still to characterize: DST interpretation, other boiler versions and actual DHW production during the period.
    - The partial write is intended to leave the remaining `A0F0` words (`A0F8` date, `A0FC` DHW mode, serial) untouched.
 7. **Zone byte 5**: keep "copy from the last relay". If tests show `0x80` is required for permanent Confort or Réduit, set it
    when writing modes `06` and `07` and clear it for `05`.

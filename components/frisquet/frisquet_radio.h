@@ -100,6 +100,7 @@ enum TextId : uint8_t {
   kLastAlert,
   kHolidayState,
   kHolidayWrite,
+  kOutdoorEmulationState,
   kTextCount,
 };
 
@@ -160,6 +161,9 @@ class FrisquetRadio : public Component {
   // Recovery only listens and changes the NetworkID; association also confirms and changes the association byte.
   bool start_network_recovery();
   bool start_association();
+  bool start_outdoor_association();
+  void set_outdoor_emulation(bool value) { outdoor_emulation_ = value; }
+  void receive_outdoor_temperature(float celsius, int32_t age_seconds);
   // Back to the YAML NetworkID and association, now and after reboots.
   bool forget_network();
 
@@ -185,6 +189,7 @@ class FrisquetRadio : public Component {
   // Zone 1 mode ("Auto", "Confort", "Réduit", "Hors Gel") and weekly programme (84 hexadecimal characters).
   bool request_zone_mode(const std::string &name);
   bool request_zone_program(const std::string &hex);
+  bool request_zone_profile(const std::string &hex, float comfort, float reduced, float frost);
   // Zone 1 boost (comfort +1.0 C, options 0x40), stopped by us after kBoostMaxMs (the Connect owns it).
   bool request_zone_boost(bool on);
   // Zone 1 thermostat: the setpoint of the active mode (comfort, reduced or frost; in Auto, the current period's).
@@ -228,6 +233,7 @@ class FrisquetRadio : public Component {
   void apply_network_();
   void publish_network_();
   void save_network_(uint8_t association);
+  void sync_outdoor_(uint32_t now);
   // True only when the radio really uses the installation's sync word and no pairing session runs.
   bool on_installation_network_() const {
     return !pairing_.active() && ::frisquet::is_usable_network(active_network_) &&
@@ -251,6 +257,12 @@ class FrisquetRadio : public Component {
   bool network_learned_{false};
   uint8_t yaml_association_{0xFF};
   bool pairing_allowed_{false};
+  bool outdoor_emulation_{false};
+  bool pairing_outdoor_{false};
+  uint8_t outdoor_association_{0xFF};
+  ESPPreferenceObject outdoor_pref_;
+  uint32_t last_outdoor_publish_ms_{0};
+  std::string last_outdoor_state_;
   bool explore_allowed_{false};
   bool live_body_reads_{false};
   uint8_t satellite_association_{0xFF};

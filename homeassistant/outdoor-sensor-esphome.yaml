@@ -1,0 +1,22 @@
+# Optional ESPHome package. Merge into your existing device configuration using packages:.
+# Experimental: keep false until boiler compatibility and rollback procedure have been checked.
+frisquet:
+  outdoor_emulation: false
+  outdoor_emulation_state:
+    name: Sonde extérieure émulée état
+
+api:
+  actions:
+    - action: outdoor_temperature
+      variables:
+        temperature: float
+        sample_age_seconds: int
+      then:
+        - lambda: |-
+            id(frisquet_component).receive_outdoor_temperature(temperature, sample_age_seconds);
+
+button:
+  - platform: frisquet
+    type: outdoor_associate
+    name: Associer la sonde extérieure
+    entity_category: config

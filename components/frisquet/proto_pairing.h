@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "proto_codec.h"
+#include "proto_outdoor.h"
 #include "proto_zone_store.h"
 
 namespace frisquet {
@@ -52,6 +53,13 @@ inline bool decode_association_offer(const uint8_t *frame, size_t length, Associ
   out.reception = h.reception;
   memcpy(out.network, frame + 7, 4);
   return true;
+}
+
+inline bool outdoor_offer_allowed(const uint8_t *frame, size_t length, const uint8_t *network) {
+  AssociationOffer offer;
+  return network && decode_association_offer(frame, length, offer) &&
+         (offer.destination == kIdOutdoorSensor || offer.destination == 0xFF) &&
+         memcmp(offer.network, network, 4) == 0;
 }
 
 // Returns 0 when `offer` is not an association offer. The 4-byte payload is the offered NetworkID echoed back (as

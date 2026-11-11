@@ -26,7 +26,7 @@ enum class TxVerdict : uint8_t {
   kMalformed,
 };
 
-enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kHolidayWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck, kSatelliteBlock };
+enum class TxClass : uint8_t { kUnknown, kReadRequest, kZoneAck, kHotWaterWrite, kHolidayWrite, kZoneWrite, kAssociationConfirm, kSatelliteConsigne, kPushAck, kSatelliteBlock, kOutdoorWrite };
 
 // Which parts of a zone block a write may change; everything else must equal the last known block.
 constexpr uint8_t kZoneFieldSetpoints = 0x01;  // comfort, reduced and frost temperatures
@@ -34,6 +34,8 @@ constexpr uint8_t kZoneFieldMode = 0x02;       // mode and options
 constexpr uint8_t kZoneFieldProgram = 0x04;    // the 42-byte weekly programme
 
 struct TxPolicy {
+  bool outdoor_enabled = false;
+  uint8_t outdoor_association = 0xFF;
   TxLevel level = TxLevel::kNone;
   bool dry_run = true;      // log what would be sent, transmit nothing
   bool kill_switch = false; // forces listen-only
@@ -125,6 +127,20 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
     if (!policy.pairing) return TxVerdict::kBlockedLevel;
     return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
   }
+  if (header.type == kInit && header.source == kIdOutdoorSensor) {
+    if (classified) *classified = TxClass::kOutdoorWrite;
+    if (header.destination != kIdBoiler || header.association != policy.outdoor_association ||
+        policy.outdoor_association == 0xFF)
+      return TxVerdict::kBlockedIdentity;
+    if (length != kOutdoorWriteLength) return TxVerdict::kMalformed;
+    uint8_t expected[kOutdoorWriteLength];
+    if (build_outdoor_write(expected, sizeof(expected), header.association, header.message_id,
+                             static_cast<int16_t>(be16(frame + 15))) != length ||
+        memcmp(frame, expected, length) != 0)
+      return TxVerdict::kBlockedAddress;
+    if (!policy.outdoor_enabled || policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
+    return policy.dry_run ? TxVerdict::kDryRun : TxVerdict::kSend;
+  }
   if (header.type == kInit && !header.is_ack() && length == kSatelliteConsigneLength && header.source >= kIdZone1 &&
       header.source <= kIdZone3) {
     cls = TxClass::kSatelliteConsigne;
@@ -212,10 +228,12 @@ inline TxVerdict evaluate_tx(const TxPolicy &policy, const uint8_t *frame, size_
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
   } else if (cls == TxClass::kHolidayWrite) {
-    static const uint8_t kBody[10] = {0xA0, 0xF0, 0x00, 0x04, 0xA0, 0xF0, 0x00, 0x04, 0x08, 0x00};
-    const uint32_t start = decode_holiday_timestamp(frame + 16);
-    const uint32_t end = decode_holiday_timestamp(frame + 20);
-    if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0 || ((start == 0) != (end == 0)) || (start && end <= start))
+    static const uint8_t kBody[9] = {0xA0, 0xF0, 0x00, 0x08, 0xA0, 0xF0, 0x00, 0x08, 0x10};
+    static const uint8_t zero[4] = {};
+    const uint32_t start = decode_holiday_timestamp(frame + 15);
+    const uint32_t end = decode_holiday_timestamp(frame + 23);
+    if (memcmp(frame + 6, kBody, sizeof(kBody)) != 0 || memcmp(frame + 19, zero, 4) != 0 ||
+        memcmp(frame + 27, zero, 4) != 0 || ((start == 0) != (end == 0)) || (start && end <= start))
       return TxVerdict::kBlockedAddress;
     if (policy.level < TxLevel::kWrite) return TxVerdict::kBlockedLevel;
   } else {

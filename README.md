@@ -20,8 +20,9 @@ complété sur une vraie chaudière (voir [docs/PROTOCOL-REFERENCE.md](docs/PROT
   Eco+ Horaires, Stop).
 - **Mode vacances** : programmer début et fin à la minute (y compris une absence de quelques heures), puis activer ou
   annuler explicitement la période depuis Home Assistant. La commande et son état vérifié sont visibles dans le tableau
-  de bord (entités date/heure nécessitant Home Assistant 2024.4 ou plus récent). L'écriture du bloc vacances A0F0 reste à
-  confirmer sur une chaudière réelle.
+  de bord (entités date/heure nécessitant Home Assistant 2024.4 ou plus récent). Programmation, annulation et fin
+  automatique vérifiées sur chaudière réelle le 11/11/2026, avec passage de la consigne à 8 °C puis retour à 18 °C.
+  Le satellite peut répercuter la consigne avec 10 à 20 minutes de retard : ne pas utiliser ce mode pour quelques minutes.
 - Mesures : ambiante, extérieure, eau chaude, départ, corps de chauffe, fumées, pression, **brûleur allumé**.
 - **Consommation** chauffage et eau chaude en kWh pour le tableau Énergie : **estimée** à partir du temps de flamme et de la
   puissance de la chaudière (`burner_power_kw`, `burner_average_load` en tête de `frisquet.yaml`). Les compteurs de la
@@ -127,10 +128,57 @@ Bon à savoir :
   suppose les identifiants par défaut (`climate.frisquet_zone_1`…). S'ils diffèrent chez vous (autre nom d'appareil, pièce
   dans le nom), générez la version adaptée : `python3 homeassistant/dashboard.py cuisine_frisquette > tableau.yaml`
   (option `--entites` si les préfixes sont mélangés, voir `--help`).
+- **Consignes sans slider** : les tuiles Confort / Réduit / Hors-gel proposent des boutons − / + par pas de 0,5 °C.
+  Cliquez sur une tuile pour saisir directement une valeur. Pour cette saisie, ajoutez `mode: box` aux trois entités
+  `number` dans votre configuration ESPHome (comme dans [frisquet.yaml](frisquet.yaml)), puis réinstallez le firmware.
+- **Carte Vacances** : choisissez début et fin avec date et heure, puis confirmez « Programmer » ; « Annuler les vacances »
+  efface la période. La période confirmée par la chaudière et l'état de la commande restent visibles ; un changement
+  des champs seuls n'envoie aucune commande. Après mise à jour d'un ancien firmware, si la période apparaît invalide,
+  annulez-la avant d'en programmer une nouvelle. Le mode Auto et les températures sauvegardées ne sont pas remplacés.
+- **Éditeur graphique du programme** : copiez [homeassistant/frisquet-program-card.js](homeassistant/frisquet-program-card.js)
+  dans `/config/www/frisquet-program-card.js` sur HA (créez `www` si nécessaire ; redémarrez HA après sa première création).
+  Dans Paramètres > Tableaux de bord > ⋮ > Ressources (mode avancé du profil activé), ajoutez
+  `/local/frisquet-program-card.js?v=4` comme **Module JavaScript**, puis rechargez le navigateur.
+  Pour mettre à jour une ancienne carte, remplacez le fichier, passez à `v=4` dans la ressource et rechargez complètement.
+  La vue compacte place les jours à gauche des bandes ; les explications sont dans **Aide et fonctionnement**.
+  Le tableau de bord utilise cette carte :
+
+  ```yaml
+  type: custom:frisquet-program-card
+  entity: text.frisquet_zone_1_programme
+  write_entity: sensor.frisquet_zone_1_ecriture
+  ```
+
+  Chaque jour est représenté par une bande bicolore : **orange = Chauffage (Confort)**, **bleu = Réduit**,
+  avec les horaires et le résumé des périodes. Cliquez sur le jour pour ajouter, modifier ou supprimer ses périodes de
+  chauffage par pas de 30 minutes (fin possible à 24:00). Les autres heures restent en Réduit ; pour une période passant
+  minuit, éditez les deux journées. Les chevauchements et les fins antérieures au début sont refusés.
+  Cochez les jours destinataires puis **Valider et copier aux jours cochés** pour réutiliser une journée sur plusieurs
+  autres, après confirmation. **Valider la journée** conserve seulement le jour édité ; **Fermer sans valider** abandonne
+  son édition. Ces actions ne transmettent rien à la chaudière. Cliquez sur **Appliquer le
+  programme**, puis confirmez pour envoyer les modifications ; la carte attend ensuite le programme publié par l'ESP.
+  L'état d'écriture indique la confirmation radio ou un refus. Le bouton **Annuler les modifications** abandonne le
+  brouillon et reprend la dernière valeur reçue (sans déclencher de lecture radio). Un changement externe pendant
+  l'édition bloque l'envoi jusqu'à l'annulation des modifications. Le programme agit en **mode Auto**, que la carte ne change pas.
+  Aucun nouveau firmware n'est nécessaire pour cette carte si l'entité texte du programme est déjà disponible.
+  Adaptez les deux identifiants à votre installation ; le générateur du tableau de bord les adapte également.
 - **Blueprint de notification** (anomalie, pile du satellite) :
   [homeassistant/blueprints/automation/frisquet_alerte.yaml](homeassistant/blueprints/automation/frisquet_alerte.yaml), à
   copier dans `config/blueprints/automation/` de Home Assistant.
+- **Plusieurs plannings** : profils nommés conservés dans HA, chacun avec sa semaine et ses températures Confort /
+  Réduit / Hors-gel, partagés entre téléphone et ordinateur. Leur application conserve le mode actuel et utilise une
+  commande unique programme + consignes (mise à jour firmware nécessaire).
+  Le dashboard complet les gère dans l'onglet **Plannings** ; l'onglet **Chauffage** sert à les charger et les activer.
+  Les deux cartes nécessitent les helpers et l'action ; l'exemple de carte simple ci-dessus reste utilisable sans profils.
+  Voir [l'installation des profils](docs/PROGRAM-PROFILES.md).
 
+
+## Sonde extérieure via Home Assistant (expérimental)
+
+Une mesure extérieure HA peut être transmise à la chaudière avec une identité radio de sonde distincte du Connect.
+Cette fonction est **désactivée par défaut** et nécessite une association explicite, après confirmation de compatibilité.
+La dernière mesure est conservée au maximum 180 minutes ; au-delà, les émissions cessent et un défaut chaudière est possible.
+Voir [l'installation et les précautions](docs/OUTDOOR-SENSOR.md) avant toute activation.
 
 ## Écran
 

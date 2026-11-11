@@ -1,4 +1,5 @@
 #pragma once
+#include "proto_outdoor.h"
 // Builders for the frames this device may transmit. They produce the payload only: the radio
 // adds the length byte and the CRC. Pure C++17.
 #include <stddef.h>
@@ -9,6 +10,19 @@
 #include "proto_decode.h"
 
 namespace frisquet {
+
+constexpr size_t kOutdoorWriteLength = 17;
+
+inline size_t build_outdoor_write(uint8_t *out, size_t capacity, uint8_t association, uint8_t id,
+                                  int16_t temperature) {
+  if (capacity < kOutdoorWriteLength || temperature < -400 || temperature > 600) return 0;
+  const uint8_t frame[kOutdoorWriteLength] = {
+      0x80, kIdOutdoorSensor, association, id, 0x01, 0x17, 0x9C, 0x54, 0x00, 0x04,
+      0xA0, 0x29, 0x00, 0x01, 0x02, static_cast<uint8_t>(static_cast<uint16_t>(temperature) >> 8),
+      static_cast<uint8_t>(temperature)};
+  memcpy(out, frame, sizeof(frame));
+  return sizeof(frame);
+}
 
 constexpr size_t kReadRequestLength = 10;
 constexpr size_t kZoneAckLength = 55;
@@ -104,7 +118,7 @@ inline size_t build_zone_write(uint8_t *out, size_t capacity, uint8_t requester,
 //   80 <self> <assoc> <id> 01 17 A0 FC 00 01 A0 FC 00 01 02 00 <mode byte>
 // The mode byte is the mode (bits 0x7E) plus the frame bits (0x81) last read from the boiler.
 constexpr size_t kHotWaterModeWriteLength = 17;
-constexpr size_t kHolidayWriteLength = 24;
+constexpr size_t kHolidayWriteLength = 31;
 
 inline size_t build_holiday_write(uint8_t *out, size_t capacity, uint8_t requester, uint8_t association,
                                   uint8_t message_id, uint32_t start, uint32_t end) {
@@ -117,10 +131,12 @@ inline size_t build_holiday_write(uint8_t *out, size_t capacity, uint8_t request
   h.reception = 0x01;
   h.type = kInit;
   write_header(out, h);
-  static const uint8_t kBody[10] = {0xA0, 0xF0, 0x00, 0x04, 0xA0, 0xF0, 0x00, 0x04, 0x08, 0x00};
+  // Each holiday date occupies four words: a 32-bit timestamp followed by four zero bytes.
+  static const uint8_t kBody[9] = {0xA0, 0xF0, 0x00, 0x08, 0xA0, 0xF0, 0x00, 0x08, 0x10};
   memcpy(out + 6, kBody, sizeof(kBody));
-  encode_holiday_timestamp(start, out + 16);
-  encode_holiday_timestamp(end, out + 20);
+  memset(out + 15, 0, 16);
+  encode_holiday_timestamp(start, out + 15);
+  encode_holiday_timestamp(end, out + 23);
   return kHolidayWriteLength;
 }
 

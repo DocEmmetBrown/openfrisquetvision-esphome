@@ -1,0 +1,16 @@
+# Home Assistant package, NOT an ESPHome package.
+# No initial value: HA restores each saved profile across restarts.
+# Add more slots here and in the card's profiles list if needed.
+input_text:
+  frisquet_planning_1:
+    name: Frisquet planning 1
+    max: 255
+  frisquet_planning_2:
+    name: Frisquet planning 2
+    max: 255
+  frisquet_planning_3:
+    name: Frisquet planning 3
+    max: 255
+  frisquet_planning_4:
+    name: Frisquet planning 4
+    max: 255
