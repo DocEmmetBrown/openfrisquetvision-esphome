@@ -131,7 +131,21 @@ Bon à savoir :
 - **Consignes sans slider** : les tuiles Confort / Réduit / Hors-gel proposent des boutons − / + par pas de 0,5 °C.
   Cliquez sur une tuile pour saisir directement une valeur. Pour cette saisie, ajoutez `mode: box` aux trois entités
   `number` dans votre configuration ESPHome (comme dans [frisquet.yaml](frisquet.yaml)), puis réinstallez le firmware.
-- **Carte Vacances** : choisissez début et fin avec date et heure, puis confirmez « Programmer » ; « Annuler les vacances »
+- **Vacances immédiates** : installez le package **Home Assistant** [holiday-immediate.yaml](homeassistant/holiday-immediate.yaml)
+  dans `/config/packages/holiday-immediate.yaml`. Si nécessaire, activez les packages dans `configuration.yaml` :
+  ```yaml
+  homeassistant:
+    packages: !include_dir_named packages
+  ```
+  Fusionnez cette option dans le bloc `homeassistant` existant, vérifiez la configuration HA puis redémarrez HA.
+  Remplacez ensuite la carte Vacances avec celle du dashboard fourni. Choisissez la **date et l'heure de retour** et
+  confirmez **Partir maintenant** : le champ Départ est remplacé par l'heure locale actuelle,
+  avec le même champ Retour que pour un départ planifié, même aujourd'hui s'il est futur.
+  Les trois entités ESPHome sont passées au script par le dashboard : adaptez-les à votre installation, ou utilisez
+  `dashboard.py --entites`. Le script attend la confirmation des dates par l'ESP avant d'activer ; une erreur est notifiée
+  dans HA. L'état d'écriture chaudière reste la confirmation finale. Aucun nouveau flash n'est nécessaire.
+- **Départ planifié** : dans la même carte Vacances, choisissez la date et l'heure de départ et de retour,
+  puis **Programmer** ; « Annuler les vacances »
   efface la période. La période confirmée par la chaudière et l'état de la commande restent visibles ; un changement
   des champs seuls n'envoie aucune commande. Après mise à jour d'un ancien firmware, si la période apparaît invalide,
   annulez-la avant d'en programmer une nouvelle. Le mode Auto et les températures sauvegardées ne sont pas remplacés.

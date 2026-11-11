@@ -47,8 +47,18 @@ class DashboardTest(unittest.TestCase):
 
     def test_vacation_actions_require_confirmation(self):
         buttons = [node for node in self.nodes if node.get("type") == "button"]
-        self.assertEqual(len(buttons), 2)
+        self.assertEqual(len(buttons), 3)
+        immediate = next(button for button in buttons if button.get("entity") == "script.frisquet_vacances_immediates")
+        self.assertEqual(immediate["tap_action"]["service"], "script.frisquet_vacances_immediates")
+        self.assertTrue(immediate["tap_action"]["confirmation"]["text"])
+        self.assertEqual(immediate["tap_action"]["data"], {
+            "start_entity": "datetime.frisquet_chaudiere_vacances_debut",
+            "end_entity": "datetime.frisquet_chaudiere_vacances_fin",
+            "activate_entity": "button.frisquet_chaudiere_activer_les_vacances",
+        })
         for button in buttons:
+            if button is immediate:
+                continue
             action = button["tap_action"]
             self.assertEqual(action["action"], "call-service")
             self.assertEqual(action["service"], "button.press")
@@ -70,6 +80,19 @@ class DashboardTest(unittest.TestCase):
         self.assertFalse(cards[0].get("profile_management", False))
         self.assertTrue(cards[1]["profile_management"])
         self.assertEqual(self.dashboard["views"][1]["path"], "plannings")
+
+    def test_vacation_departure_options_are_explicit(self):
+        cards = [node for node in self.nodes if node.get("title") == "Vacances"]
+        self.assertEqual(len(cards), 1)
+        card = cards[0]
+        self.assertEqual(card["type"], "entities")
+        self.assertEqual([row["entity"] for row in card["entities"][:2]], [
+            "datetime.frisquet_chaudiere_vacances_debut",
+            "datetime.frisquet_chaudiere_vacances_fin",
+        ])
+        self.assertEqual(card["entities"][2]["name"], "Partir maintenant")
+        self.assertEqual(card["entities"][3]["action_name"], "Programmer")
+        self.assertNotIn("input_datetime.frisquet_vacances_retour", str(card))
 
     def test_prefix_rewrites_entities_and_action_targets(self):
         result = subprocess.run(

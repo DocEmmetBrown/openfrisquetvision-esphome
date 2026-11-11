@@ -6,6 +6,7 @@
 # (autre nom, pièce dans le nom), générez la version adaptée : python3 homeassistant/dashboard.py cuisine_frisquette
 # Installer aussi la ressource frisquet-program-card.js : voir README.md, section Home Assistant.
 # Les profils et l'onglet Plannings nécessitent les helpers HA et l'action ESPHome décrits dans docs/PROGRAM-PROFILES.md.
+# Les vacances immédiates nécessitent le package HA holiday-immediate.yaml.
 title: Chauffage
 views:
   - title: Chauffage
@@ -83,50 +84,56 @@ views:
               - type: numeric-input
                 style: buttons
 
-      - type: vertical-stack
-        cards:
-          - type: markdown
-            content: |
-              ## Vacances
-              Choisissez les dates et heures locales de début et de fin, puis **Programmer**.
-              Une absence de quelques heures est possible. Modifier les dates ne suffit pas à les appliquer.
-
-              **Expérimental :** le comportement sur chaudière réelle reste à valider.
-          - type: entities
-            show_header_toggle: false
-            entities:
-              - entity: datetime.frisquet_chaudiere_vacances_debut
-                name: Début de l'absence
-              - entity: datetime.frisquet_chaudiere_vacances_fin
-                name: Fin de l'absence
-              - entity: sensor.frisquet_chaudiere_vacances_etat
-                name: Période confirmée par la chaudière
-              - entity: sensor.frisquet_chaudiere_vacances_ecriture
-                name: État de la commande
-          - type: horizontal-stack
-            cards:
-              - type: button
-                entity: button.frisquet_chaudiere_activer_les_vacances
-                name: Programmer
-                icon: mdi:calendar-check
-                tap_action:
-                  action: call-service
-                  service: button.press
-                  target:
-                    entity_id: button.frisquet_chaudiere_activer_les_vacances
-                  confirmation:
-                    text: Programmer les vacances avec les dates et heures choisies ?
-              - type: button
-                entity: button.frisquet_chaudiere_annuler_les_vacances
-                name: Annuler les vacances
-                icon: mdi:calendar-remove
-                tap_action:
-                  action: call-service
-                  service: button.press
-                  target:
-                    entity_id: button.frisquet_chaudiere_annuler_les_vacances
-                  confirmation:
-                    text: Effacer la période de vacances de la chaudière ?
+      - type: entities
+        title: Vacances
+        show_header_toggle: false
+        entities:
+          - entity: datetime.frisquet_chaudiere_vacances_debut
+            name: Départ
+          - entity: datetime.frisquet_chaudiere_vacances_fin
+            name: Retour
+          - type: button
+            entity: script.frisquet_vacances_immediates
+            name: Partir maintenant
+            action_name: Partir
+            icon: mdi:bag-suitcase
+            tap_action:
+              action: call-service
+              service: script.frisquet_vacances_immediates
+              data:
+                start_entity: datetime.frisquet_chaudiere_vacances_debut
+                end_entity: datetime.frisquet_chaudiere_vacances_fin
+                activate_entity: button.frisquet_chaudiere_activer_les_vacances
+              confirmation:
+                text: Remplacer le départ par maintenant et partir jusqu'au retour choisi ?
+          - type: button
+            entity: button.frisquet_chaudiere_activer_les_vacances
+            name: Programmer les dates
+            action_name: Programmer
+            icon: mdi:calendar-check
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.frisquet_chaudiere_activer_les_vacances
+              confirmation:
+                text: Programmer les vacances avec les dates et heures de départ et de retour choisies ?
+          - type: button
+            entity: button.frisquet_chaudiere_annuler_les_vacances
+            name: Annuler les vacances
+            action_name: Annuler
+            icon: mdi:calendar-remove
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.frisquet_chaudiere_annuler_les_vacances
+              confirmation:
+                text: Effacer la période de vacances de la chaudière ?
+          - entity: sensor.frisquet_chaudiere_vacances_etat
+            name: Période confirmée
+          - entity: sensor.frisquet_chaudiere_vacances_ecriture
+            name: État de la commande
 
       - type: entities
         title: Chaudière

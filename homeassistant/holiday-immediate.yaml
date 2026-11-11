@@ -1,0 +1,79 @@
+# Home Assistant package, NOT an ESPHome package.
+script:
+  frisquet_vacances_immediates:
+    alias: Frisquet - Partir en vacances maintenant
+    description: Départ immédiat, retour à la date et à l'heure choisies.
+    mode: single
+    fields:
+      start_entity:
+        required: true
+        selector:
+          entity:
+            domain: datetime
+      end_entity:
+        required: true
+        selector:
+          entity:
+            domain: datetime
+      activate_entity:
+        required: true
+        selector:
+          entity:
+            domain: button
+    sequence:
+      - variables:
+          departure: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          return_datetime: >-
+            {% set end = as_datetime(states(end_entity), none) %}
+            {{ as_local(end).strftime('%Y-%m-%d %H:%M:%S') if end is not none else '' }}
+      - if:
+          - condition: template
+            value_template: >-
+              {{ not return_datetime
+                 or return_datetime <= departure
+                 or states[start_entity] is none or states(start_entity) == 'unavailable'
+                 or states[end_entity] is none or states(end_entity) == 'unavailable'
+                 or states[activate_entity] is none or states(activate_entity) == 'unavailable' }}
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: frisquet_vacances_erreur
+              title: Vacances non programmées
+              message: Choisissez une date et une heure de retour dans le futur et vérifiez la connexion ESPHome.
+          - stop: Date et heure de retour invalides ou entités ESPHome indisponibles.
+            error: true
+      - action: datetime.set_value
+        target:
+          entity_id: "{{ start_entity }}"
+        data:
+          datetime: "{{ departure }}"
+      - action: datetime.set_value
+        target:
+          entity_id: "{{ end_entity }}"
+        data:
+          datetime: "{{ return_datetime }}"
+      - wait_template: >-
+          {% set start = as_datetime(states(start_entity), none) %}
+          {% set end = as_datetime(states(end_entity), none) %}
+          {{ start is not none and end is not none
+             and as_local(start).strftime('%Y-%m-%d %H:%M:%S') == departure
+             and as_local(end).strftime('%Y-%m-%d %H:%M:%S') == return_datetime }}
+        timeout: "00:00:15"
+        continue_on_timeout: true
+      - if:
+          - condition: template
+            value_template: "{{ not wait.completed }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: frisquet_vacances_erreur
+              title: Vacances non programmées
+              message: L'ESP n'a pas confirmé les dates. Aucune activation n'a été envoyée ; réessayez après reconnexion.
+          - stop: Confirmation des dates ESPHome expirée.
+            error: true
+      - action: button.press
+        target:
+          entity_id: "{{ activate_entity }}"
+      - action: persistent_notification.dismiss
+        data:
+          notification_id: frisquet_vacances_erreur
