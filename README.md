@@ -70,6 +70,11 @@ esphome run frisquet.yaml
 
 Les mises à jour suivantes passent par le Wi-Fi.
 
+Avec **ESPHome 2026.11**, utilisez une version à jour du composant Frisquet. Si la compilation signale que
+`format_hex` ou `format_hex_pretty` est introuvable, ajoutez temporairement `refresh: always` à l'entrée
+`external_components` du composant Frisquet, puis recompilez. Sans cette option, ESPHome peut conserver
+la copie GitHub précédente en cache pendant un jour.
+
 **Remplacer un firmware ESPHome déjà installé** (autre nom, mot de passe OTA) sans câble : pour le premier envoi seulement,
 ajoutez `use_address: <adresse IP de la carte>` sous `wifi:` et remplacez `encryption: {}` de la section `ota:` par
 `password: "<mot de passe OTA de l'ancien firmware>"`. Une fois installé, revenez à `encryption: {}`, retirez `use_address`
